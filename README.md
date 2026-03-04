@@ -2,7 +2,7 @@
 
 Desktop GUI for Proxmark3. Scan, clone and manage RFID/NFC cards without touching the command line.
 
-![macOS](https://img.shields.io/badge/macOS-12%2B-lightgrey) ![Linux](https://img.shields.io/badge/Linux-x64-orange) ![License](https://img.shields.io/badge/license-GPL--3.0-green) ![Version](https://img.shields.io/badge/version-1.2.0-brightgreen)
+![macOS](https://img.shields.io/badge/macOS-12%2B-lightgrey) ![Linux](https://img.shields.io/badge/Linux-x64-orange) ![Windows](https://img.shields.io/badge/Windows-10%2B-blue) ![License](https://img.shields.io/badge/license-GPL--3.0-green) ![Version](https://img.shields.io/badge/version-1.2.0-brightgreen)
 
 ## What it does
 
@@ -35,7 +35,7 @@ T5577 (LF), EM4305 (LF), Gen1a, Gen2/CUID, Gen3, Gen4 GTU, Gen4 GDM/USCUID, Magi
 ## Requirements
 
 - **Proxmark3** device (Easy, RDV4, Max, or compatible clone)
-- **macOS 12+** (x64/Apple Silicon) or **Linux** (x64, AppImage or .deb)
+- **macOS 12+** (x64/Apple Silicon), **Windows 10+** (x64), or **Linux** (x64, AppImage or .deb)
 
 Proxmark3 firmware v4.20728+ recommended.
 
@@ -56,10 +56,19 @@ git clone https://github.com/Rodney9290/radium.git
 cd radium
 npm install
 npx tauri dev      # development
-npx tauri build    # production build (macOS: .dmg, Linux: deb + AppImage)
+npx tauri build    # production build (macOS: .dmg, Windows: NSIS, Linux: deb + AppImage)
 ```
 
-The Proxmark3 client sidecar binary must be placed in `src-tauri/binaries/` named `proxmark3-{target_triple}` (e.g. `proxmark3-x86_64-apple-darwin` for macOS). Build it from the [Iceman fork](https://github.com/RfidResearchGroup/proxmark3) with `make client`.
+The Proxmark3 client sidecar binary must be placed in `src-tauri/binaries/` named `proxmark3-{target_triple}`. Build it from the [Iceman fork](https://github.com/RfidResearchGroup/proxmark3) with `make client`.
+
+| Platform | Binary name | Notes |
+|----------|-------------|-------|
+| macOS x64 | `proxmark3-x86_64-apple-darwin` | `make client` |
+| macOS ARM | `proxmark3-aarch64-apple-darwin` | `make client` |
+| Linux x64 | `proxmark3-x86_64-unknown-linux-gnu` | `make client` |
+| Windows x64 | `proxmark3-x86_64-pc-windows-msvc.exe` | Build via [ProxSpace](https://github.com/Gator96100/ProxSpace) or MSYS2, place required DLLs in `src-tauri/pm3-libs/` |
+
+**Windows DLLs:** Copy the following from your ProxSpace/MSYS2 build alongside the `.exe`: `libusb-1.0.dll`, `libreadline8.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll` (exact DLLs depend on your build toolchain). Radium also checks `C:\proxmark3\proxmark3.exe` and `C:\Program Files\proxmark3\proxmark3.exe` as fallback paths if no sidecar is bundled.
 
 ### Linux additional setup
 
@@ -99,7 +108,7 @@ For HF cards (MIFARE Classic), Radium runs automatic key recovery (autopwn) befo
 - **Chip erase** — standalone T5577/EM4305 wipe tool
 - **Expert mode** — raw PM3 command input in the console drawer
 - **Linux permissions checker** — detects missing group membership / udev rules and shows fix commands
-- **Keyboard shortcuts** — Cmd+1-5 for tabs, Cmd+D to connect, Cmd+R to refresh
+- **Keyboard shortcuts** — Cmd/Ctrl+1-5 for tabs, Cmd/Ctrl+D to connect, Cmd/Ctrl+R to refresh
 - **Sound effects and music** — optional audio feedback and ambient music (off by default)
 - **Dark mode** — follows system preference
 
@@ -138,7 +147,8 @@ Radium is a fork of [Phosphor](https://github.com/nikitaart2000/phosphor) by nik
 - Transport health monitoring with transparent crash recovery
 - Linux support (permission checker, udev rules, AppImage/deb packaging)
 - Device capability detection (model, firmware, hardware variant)
-- Keyboard shortcuts (Cmd+1-5 tabs, Cmd+D connect, Cmd+R refresh)
+- Keyboard shortcuts (Cmd/Ctrl+1-5 tabs, Cmd/Ctrl+D connect, Cmd/Ctrl+R refresh)
+- Windows support (NSIS installer, COM port detection)
 - Clone history with search, status/date filters, and delete
 - Renamed from Phosphor to Radium
 

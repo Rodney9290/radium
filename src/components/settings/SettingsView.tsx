@@ -73,10 +73,12 @@ function ToggleRow({ label, description, checked, onChange }: {
   );
 }
 
+const MOD = navigator.platform?.startsWith('Mac') ? '\u2318' : 'Ctrl+';
+
 const SHORTCUTS = [
-  { keys: '\u2318 1\u20135', action: 'Switch tabs' },
-  { keys: '\u2318 D', action: 'Connect device' },
-  { keys: '\u2318 R', action: 'Refresh current view' },
+  { keys: `${MOD}1\u20135`, action: 'Switch tabs' },
+  { keys: `${MOD}D`, action: 'Connect device' },
+  { keys: `${MOD}R`, action: 'Refresh current view' },
   { keys: 'Esc', action: 'Cancel / Reset' },
 ];
 
