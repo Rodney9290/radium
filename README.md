@@ -48,27 +48,24 @@ On Linux, Radium uses the system-installed PM3 client (found via PATH). Install 
 
 ## Installation
 
-### Windows
+### Build from source
 
-1. Download `Radium_1.2.0_x64-setup.exe` from [Releases](../../releases)
-2. Run the installer
-3. Plug in your Proxmark3
-4. Launch Radium
+```bash
+# Prerequisites: Node.js 18+, Rust 1.70+
 
-### macOS
+git clone https://github.com/Rodney9290/radium.git
+cd radium
+npm install
+npx tauri dev      # development
+npx tauri build    # production build (Windows: NSIS, macOS: .dmg, Linux: deb + AppImage)
+```
 
-1. Download `Radium_1.2.0_x64.dmg` from [Releases](../../releases)
-2. Open the `.dmg` and drag Radium to Applications
-3. Plug in your Proxmark3
-4. Launch Radium
+The Proxmark3 client sidecar binary must be placed in `src-tauri/binaries/` named `proxmark3-{target_triple}` (e.g. `proxmark3-x86_64-apple-darwin` for macOS). Build it from the [Iceman fork](https://github.com/RfidResearchGroup/proxmark3) with `make client`.
 
-The PM3 client is bundled inside the app — no separate installation needed.
+### Linux additional setup
 
-### Linux
-
-1. Download `Radium_1.2.0_amd64.AppImage` or `radium_1.2.0_amd64.deb` from [Releases](../../releases)
-2. Install the Proxmark3 client (`apt install proxmark3` or build from source)
-3. Set up device permissions:
+1. Install the Proxmark3 client (`apt install proxmark3` or build from source)
+2. Set up device permissions:
    ```bash
    sudo usermod -aG dialout $USER
    sudo usermod -aG plugdev $USER
@@ -76,8 +73,6 @@ The PM3 client is bundled inside the app — no separate installation needed.
    sudo udevadm control --reload-rules && sudo udevadm trigger
    # Log out and back in for group changes to take effect
    ```
-4. Plug in your Proxmark3
-5. Launch Radium
 
 ## How to use
 
@@ -105,20 +100,6 @@ For HF cards (MIFARE Classic), Radium runs automatic key recovery (autopwn) befo
 - **Linux permissions checker** — detects missing group membership / udev rules and shows fix commands
 - **Sound effects and music** — optional audio feedback and ambient music (off by default)
 - **Dark mode** — follows system preference
-
-## Building from source
-
-```bash
-# Prerequisites: Node.js 18+, Rust 1.70+
-
-git clone https://github.com/your-username/radium.git
-cd radium
-npm install
-npx tauri dev      # development
-npx tauri build    # production build (Windows: NSIS, macOS: .dmg, Linux: deb + AppImage)
-```
-
-On Windows, the PM3 client binary and its DLLs go in `src-tauri/binaries/` and `src-tauri/pm3-libs/`. On Linux, the PM3 client is expected on PATH.
 
 ## Architecture
 
@@ -151,8 +132,6 @@ Radium is a fork of [Phosphor](https://github.com/nikitaart2000/phosphor) by nik
 - Persistent PM3 session manager with transport abstraction (interactive + batch fallback)
 - Linux support (permission checker, udev rules, AppImage/deb packaging)
 - Device capability detection (model, firmware, hardware variant)
-- Apple-esque UI redesign (system fonts, light/dark mode, shared component library)
-- Sound effects and background music (opt-in)
 - Renamed from Phosphor to Radium
 
 ## License
