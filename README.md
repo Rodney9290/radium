@@ -36,7 +36,6 @@ T5577 (LF), EM4305 (LF), Gen1a, Gen2/CUID, Gen3, Gen4 GTU, Gen4 GDM/USCUID, Magi
 
 - **Proxmark3** device (Easy, RDV4, Max, or compatible clone)
 - **macOS 12+** (x64/Apple Silicon) or **Linux** (x64, AppImage or .deb)
-- USB cable (data cable, not charge-only)
 
 Proxmark3 firmware v4.20728+ recommended.
 

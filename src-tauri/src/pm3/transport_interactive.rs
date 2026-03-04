@@ -11,7 +11,7 @@ use tokio::time::timeout;
 use crate::error::AppError;
 use crate::pm3::output_parser::strip_ansi;
 use crate::pm3::transport::Pm3Transport;
-use crate::pm3::transport_cli::pm3_scope_names;
+use crate::pm3::transport_cli::{pm3_scope_names, validate_command};
 use crate::pm3::types::OutputLine;
 
 /// Default timeout for waiting for the PM3 prompt (30 seconds).
@@ -217,6 +217,7 @@ impl CliTransportInteractive {
 #[async_trait]
 impl Pm3Transport for CliTransportInteractive {
     async fn send(&self, cmd: &str) -> Result<String, AppError> {
+        validate_command(cmd)?;
         // Write command to stdin
         self.write_stdin(cmd)?;
 
@@ -231,6 +232,7 @@ impl Pm3Transport for CliTransportInteractive {
         timeout_secs: u64,
         mut on_line: Box<dyn FnMut(OutputLine) + Send>,
     ) -> Result<String, AppError> {
+        validate_command(cmd)?;
         self.write_stdin(cmd)?;
 
         self.read_until_prompt(timeout_secs, &mut |line| {
