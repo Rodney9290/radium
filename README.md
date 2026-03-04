@@ -2,7 +2,7 @@
 
 Desktop GUI for Proxmark3. Scan, clone and manage RFID/NFC cards without touching the command line.
 
-![Windows](https://img.shields.io/badge/Windows-10%2B-blue) ![macOS](https://img.shields.io/badge/macOS-12%2B-lightgrey) ![Linux](https://img.shields.io/badge/Linux-x64-orange) ![License](https://img.shields.io/badge/license-GPL--3.0-green) ![Version](https://img.shields.io/badge/version-1.2.0-brightgreen)
+![macOS](https://img.shields.io/badge/macOS-12%2B-lightgrey) ![Linux](https://img.shields.io/badge/Linux-x64-orange) ![License](https://img.shields.io/badge/license-GPL--3.0-green) ![Version](https://img.shields.io/badge/version-1.2.0-brightgreen)
 
 ## What it does
 
@@ -35,7 +35,7 @@ T5577 (LF), EM4305 (LF), Gen1a, Gen2/CUID, Gen3, Gen4 GTU, Gen4 GDM/USCUID, Magi
 ## Requirements
 
 - **Proxmark3** device (Easy, RDV4, Max, or compatible clone)
-- **Windows 10+** (x64), **macOS 12+** (x64/Apple Silicon), or **Linux** (x64, AppImage or .deb)
+- **macOS 12+** (x64/Apple Silicon) or **Linux** (x64, AppImage or .deb)
 - USB cable (data cable, not charge-only)
 
 Proxmark3 firmware v4.20728+ recommended.
