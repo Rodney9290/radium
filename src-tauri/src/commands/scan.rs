@@ -1,23 +1,24 @@
 use std::sync::Mutex;
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::cards::types::{CardType, RecoveryAction};
 use crate::error::AppError;
-use crate::pm3::{command_builder, connection, output_parser};
+use crate::pm3::{command_builder, output_parser};
+use crate::pm3::session::Pm3Session;
 use crate::state::{WizardAction, WizardMachine, WizardState};
 
 #[tauri::command]
 pub async fn scan_card(
-    app: AppHandle,
+    session: State<'_, Pm3Session>,
     machine: State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    // Get the port from current state, then transition to ScanningCard
-    let port = {
+    // Validate we're in DeviceConnected state, then transition to ScanningCard
+    {
         let mut m = machine.lock().map_err(|e| {
             AppError::CommandFailed(format!("State lock poisoned: {}", e))
         })?;
-        let port = match &m.current {
-            WizardState::DeviceConnected { port, .. } => port.clone(),
+        match &m.current {
+            WizardState::DeviceConnected { .. } => {}
             _ => {
                 return Err(AppError::InvalidTransition(
                     "Must be in DeviceConnected to scan".to_string(),
@@ -25,12 +26,11 @@ pub async fn scan_card(
             }
         };
         m.transition(WizardAction::StartScan)?;
-        port
     };
 
     // 1. Try LF search first (fast path for 125 kHz cards)
     let lf_result =
-        connection::run_command(&app, &port, command_builder::build_lf_search()).await;
+        session.run_command(&command_builder::build_lf_search()).await;
 
     if let Ok(ref output) = lf_result {
         if let Some((card_type, card_data)) = output_parser::parse_lf_search(output) {
@@ -40,14 +40,14 @@ pub async fn scan_card(
 
     // 2. LF found nothing → try HF search (13.56 MHz)
     let hf_result =
-        connection::run_command(&app, &port, command_builder::build_hf_search()).await;
+        session.run_command(&command_builder::build_hf_search()).await;
 
     match hf_result {
         Ok(output) => {
             if let Some((card_type, mut card_data)) = output_parser::parse_hf_search(&output)
             {
                 // Enrich HF data with protocol-specific info commands
-                enrich_hf_data(&app, &port, &card_type, &mut card_data).await;
+                enrich_hf_data(session.inner(), &card_type, &mut card_data).await;
                 return finish_scan(&machine, card_type, card_data);
             }
 
@@ -99,8 +99,7 @@ pub async fn scan_card(
 /// For MIFARE Classic: `hf 14a info` (PRNG) + `hf mf info` (magic detection).
 /// For UL/NTAG: `hf mfu info` for subtype detection.
 async fn enrich_hf_data(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     card_type: &CardType,
     card_data: &mut crate::cards::types::CardData,
 ) {
@@ -109,7 +108,7 @@ async fn enrich_hf_data(
             // Get PRNG info if not already present
             if !card_data.decoded.contains_key("prng") {
                 if let Ok(info_output) =
-                    connection::run_command(app, port, command_builder::build_hf_14a_info())
+                    session.run_command(&command_builder::build_hf_14a_info())
                         .await
                 {
                     let clean = output_parser::strip_ansi(&info_output);
@@ -127,7 +126,7 @@ async fn enrich_hf_data(
             // Get magic card info
             if !card_data.decoded.contains_key("magic") {
                 if let Ok(mf_output) =
-                    connection::run_command(app, port, command_builder::build_hf_mf_info())
+                    session.run_command(&command_builder::build_hf_mf_info())
                         .await
                 {
                     let clean = output_parser::strip_ansi(&mf_output);
@@ -145,7 +144,7 @@ async fn enrich_hf_data(
         CardType::MifareUltralight | CardType::NTAG => {
             // Get UL/NTAG subtype info
             if let Ok(mfu_output) =
-                connection::run_command(app, port, command_builder::build_hf_mfu_info()).await
+                session.run_command(&command_builder::build_hf_mfu_info()).await
             {
                 let clean = output_parser::strip_ansi(&mfu_output);
                 // Check for NTAG type

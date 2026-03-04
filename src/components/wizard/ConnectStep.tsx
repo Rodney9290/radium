@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
 import { useSfx } from '../../hooks/useSfx';
 
 interface ConnectStepProps {
@@ -9,57 +9,53 @@ interface ConnectStepProps {
 
 export function ConnectStep({ onConnected, isLoading }: ConnectStepProps) {
   const sfx = useSfx();
-  const [dots, setDots] = useState('');
-
-  // Animated dots while loading
-  useEffect(() => {
-    if (!isLoading) return;
-    const timer = setInterval(() => {
-      setDots(prev => (prev.length >= 3 ? '' : prev + '.'));
-    }, 400);
-    return () => clearInterval(timer);
-  }, [isLoading]);
-
   return (
-    <TerminalPanel title="DEVICE">
-      {isLoading ? (
-        <div style={{ color: 'var(--amber)', fontSize: '14px' }}>
-          DETECTING DEVICE{dots}
+    <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)' }}>
+        {/* Device icon */}
+        <div style={{
+          width: '64px',
+          height: '64px',
+          borderRadius: 'var(--radius-lg)',
+          background: 'var(--bg-tertiary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '28px',
+        }}>
+          {isLoading ? (
+            <span style={{ animation: 'spin 1.5s linear infinite' }}>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              &#x21BB;
+            </span>
+          ) : '📶'}
         </div>
-      ) : (
-        <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-          <div style={{ color: 'var(--green-dim)', marginBottom: '12px' }}>
-            No device detected. Connect a Proxmark3 and press CONNECT.
+
+        <div>
+          <div style={{
+            fontSize: '18px',
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            marginBottom: 'var(--space-1)',
+          }}>
+            {isLoading ? 'Detecting Device...' : 'Connect Your Proxmark3'}
           </div>
-          <button
-            onClick={() => { if (!isLoading) { sfx.action(); onConnected(); } }}
-            disabled={isLoading}
-            style={{
-              background: 'var(--bg-void)',
-              color: isLoading ? 'var(--green-dim)' : 'var(--green-bright)',
-              border: `2px solid ${isLoading ? 'var(--green-dim)' : 'var(--green-bright)'}`,
-              fontFamily: 'var(--font-mono)',
-              fontSize: '14px',
-              fontWeight: 600,
-              padding: '8px 24px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              textTransform: 'uppercase',
-              opacity: isLoading ? 0.5 : 1,
-            }}
-            onMouseEnter={(e) => {
-              if (!isLoading) {
-                sfx.hover();
-                e.currentTarget.style.background = 'var(--green-ghost)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-            }}
-          >
-            CONNECT
-          </button>
+          <div style={{
+            fontSize: '14px',
+            color: 'var(--text-secondary)',
+          }}>
+            {isLoading
+              ? 'Searching for connected devices...'
+              : 'Plug in your Proxmark3 device and click Connect to get started.'}
+          </div>
         </div>
-      )}
-    </TerminalPanel>
+
+        {!isLoading && (
+          <Button variant="primary" size="lg" onClick={() => { sfx.action(); onConnected(); }}>
+            Connect
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }

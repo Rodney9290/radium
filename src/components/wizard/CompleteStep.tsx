@@ -1,4 +1,6 @@
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { useEffect } from 'react';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
 import { useSfx } from '../../hooks/useSfx';
 import type { CardType, CardData } from '../../machines/types';
 
@@ -13,6 +15,11 @@ interface CompleteStepProps {
 export function CompleteStep({ onReset, onDisconnect, cardType, cardData, timestamp }: CompleteStepProps) {
   const sfx = useSfx();
 
+  // Play success sound on mount
+  useEffect(() => {
+    sfx.action();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const displayType = cardType || 'Unknown';
   const displayUid = cardData?.uid || 'N/A';
   const displayTime = (() => {
@@ -24,71 +31,75 @@ export function CompleteStep({ onReset, onDisconnect, cardType, cardData, timest
   })();
 
   return (
-    <TerminalPanel title="COMPLETE">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-        <div style={{ color: 'var(--green-bright)', fontWeight: 700, marginBottom: '12px' }}>
-          [OK] OPERATION COMPLETE
+    <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+        {/* Success icon */}
+        <div style={{
+          width: '64px',
+          height: '64px',
+          borderRadius: '50%',
+          background: 'var(--success)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '32px',
+          color: '#FFFFFF',
+        }}>
+          &#x2713;
         </div>
 
-        <div style={{ color: 'var(--green-dim)' }}>
-          SOURCE : {displayType} / {displayUid}
-        </div>
-        <div style={{ color: 'var(--green-dim)' }}>
-          TARGET : Clone (verified)
-        </div>
-        <div style={{ color: 'var(--green-dim)' }}>
-          TIME   : {displayTime}
-        </div>
-        <div style={{ color: 'var(--green-dim)' }}>
-          STATUS : VERIFIED
+        <div>
+          <div style={{
+            fontSize: '20px',
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            marginBottom: 'var(--space-1)',
+          }}>
+            Clone Complete
+          </div>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+            Your card has been successfully cloned and verified.
+          </div>
         </div>
 
-        <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <button
-            onClick={() => { sfx.action(); onReset(); }}
-            style={{
-              background: 'var(--bg-void)',
-              color: 'var(--green-bright)',
-              border: '2px solid var(--green-bright)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '14px',
-              fontWeight: 600,
-              padding: '8px 24px',
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.background = 'var(--green-ghost)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-            }}
-          >
-            CLONE ANOTHER
-          </button>
+        {/* Summary */}
+        <div style={{
+          width: '100%',
+          background: 'var(--bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          padding: 'var(--space-3) var(--space-4)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+          textAlign: 'left',
+        }}>
+          <SummaryRow label="Source" value={`${displayType} / ${displayUid}`} />
+          <SummaryRow label="Target" value="Clone (verified)" />
+          <SummaryRow label="Time" value={displayTime} />
+          <SummaryRow label="Status" value="Verified" />
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Button variant="primary" size="md" onClick={onReset}>
+            Clone Another
+          </Button>
           {onDisconnect && (
-            <span
-              onClick={() => { sfx.action(); onDisconnect(); }}
-              style={{
-                color: 'var(--green-dim)',
-                fontSize: '12px',
-                cursor: 'pointer',
-                fontFamily: 'var(--font-mono)',
-                userSelect: 'none',
-              }}
-              onMouseEnter={(e) => {
-                sfx.hover();
-                e.currentTarget.style.color = 'var(--green-bright)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = 'var(--green-dim)';
-              }}
-            >
-              [DISCONNECT]
-            </span>
+            <Button variant="ghost" size="sm" onClick={onDisconnect}>
+              Disconnect
+            </Button>
           )}
         </div>
       </div>
-    </TerminalPanel>
+    </Card>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+      <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
+      <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{value}</span>
+    </div>
   );
 }

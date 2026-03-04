@@ -1,5 +1,5 @@
 [package]
-name = "phosphor"
+name = "radium"
 version = "1.1.0"
 description = "Proxmark3 GUI for One-Click Fob Cloning"
 authors = ["nik shuv"]
@@ -7,7 +7,7 @@ license = "GPL-3.0-only"
 edition = "2021"
 
 [lib]
-name = "phosphor_lib"
+name = "radium_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -26,4 +26,5 @@ log = "0.4.29"
 env_logger = "0.11.8"
 thiserror = "1.0.69"
 chrono = { version = "0.4.43", features = ["serde"] }
+async-trait = "0.1"
 

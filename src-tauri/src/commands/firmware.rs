@@ -7,6 +7,7 @@ use tauri_plugin_shell::ShellExt;
 
 use crate::error::AppError;
 use crate::pm3::connection;
+use crate::pm3::session::Pm3Session;
 use crate::pm3::version::parse_detailed_hw_version;
 
 // ---------------------------------------------------------------------------
@@ -68,9 +69,10 @@ static PORT_RE: LazyLock<Regex> = LazyLock::new(|| {
 #[tauri::command]
 pub async fn check_firmware_version(
     app: AppHandle,
-    port: String,
+    _port: String,
+    session: State<'_, Pm3Session>,
 ) -> Result<FirmwareCheckResult, AppError> {
-    let output = match connection::run_command(&app, &port, "hw version").await {
+    let output = match session.run_command("hw version").await {
         Ok(out) => out,
         Err(e) => {
             // Capabilities mismatch — PM3 client refuses to run commands because

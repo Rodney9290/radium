@@ -1,23 +1,27 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
-interface PhosphorSettings {
+interface RadiumSettings {
   expertMode: boolean;
+  soundEffects: boolean;
+  backgroundMusic: boolean;
 }
 
-const DEFAULT_SETTINGS: PhosphorSettings = {
+const DEFAULT_SETTINGS: RadiumSettings = {
   expertMode: false,
+  soundEffects: false,
+  backgroundMusic: false,
 };
 
-const STORAGE_KEY = 'phosphor-settings';
+const STORAGE_KEY = 'radium-settings';
 
 interface SettingsContextValue {
-  settings: PhosphorSettings;
-  updateSettings: (partial: Partial<PhosphorSettings>) => void;
+  settings: RadiumSettings;
+  updateSettings: (partial: Partial<RadiumSettings>) => void;
 }
 
 const SettingsCtx = createContext<SettingsContextValue | null>(null);
 
-function loadSettings(): PhosphorSettings {
+function loadSettings(): RadiumSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -30,7 +34,7 @@ function loadSettings(): PhosphorSettings {
   return { ...DEFAULT_SETTINGS };
 }
 
-function saveSettings(settings: PhosphorSettings) {
+function saveSettings(settings: RadiumSettings) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
@@ -39,14 +43,14 @@ function saveSettings(settings: PhosphorSettings) {
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<PhosphorSettings>(loadSettings);
+  const [settings, setSettings] = useState<RadiumSettings>(loadSettings);
 
   // Persist to localStorage whenever settings change
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
 
-  const updateSettings = useCallback((partial: Partial<PhosphorSettings>) => {
+  const updateSettings = useCallback((partial: Partial<RadiumSettings>) => {
     setSettings(prev => ({ ...prev, ...partial }));
   }, []);
 

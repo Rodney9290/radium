@@ -190,6 +190,23 @@ export interface SavedCard {
   createdAt: string;
 }
 
+// Hardware platform variants for Proxmark3 devices
+export type ProxmarkPlatform = 'Easy' | 'RDV4' | 'RDV4BT' | 'ICopyX' | 'Generic256';
+
+// Full device capabilities from `hw version` output
+export interface DeviceCapabilities {
+  port: string;
+  model: string;
+  platform: ProxmarkPlatform;
+  clientVersion: string;
+  firmwareVersion: string;
+  versionsMatch: boolean;
+  hardwareVariant: string;
+  hasExternalFlash: boolean;
+  hasSmartcard: boolean;
+  hasBt: boolean;
+}
+
 // T5577 chip status for password detection and safety workflow
 export interface T5577Status {
   detected: boolean;

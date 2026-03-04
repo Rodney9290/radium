@@ -1,5 +1,6 @@
-import { TerminalPanel } from '../shared/TerminalPanel';
-import { useSfx } from '../../hooks/useSfx';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
+import { InlineNotice } from '../shared/InlineNotice';
 import type { RecoveryAction } from '../../machines/types';
 
 interface ErrorStepProps {
@@ -13,108 +14,106 @@ interface ErrorStepProps {
 
 function getRetryLabel(action: RecoveryAction | null | undefined, source?: string | null): string {
   if (action === 'Retry' && (source === 'write' || source === 'blank')) {
-    return 'RETRY WRITE';
+    return 'Retry Write';
   }
   switch (action) {
     case 'Reconnect':
-      return 'RECONNECT';
+      return 'Reconnect';
     case 'Retry':
-      return 'RETRY';
+      return 'Retry';
     case 'GoBack':
-      return 'GO BACK';
+      return 'Go Back';
     default:
-      return 'RETRY';
+      return 'Retry';
   }
 }
 
 const DETECT_HINTS = [
   'Try a different USB cable (some cables are charge-only)',
   'Check Device Manager for a COM port (Ports section)',
-  'PM3 Easy may need CH340 driver — download from wch-ic.com',
-  'Antivirus may block proxmark3.exe — add it to exceptions',
+  'PM3 Easy may need CH340 driver \u2014 download from wch-ic.com',
+  'Antivirus may block proxmark3.exe \u2014 add it to exceptions',
 ];
 
 export function ErrorStep({ message, recoverable, recoveryAction, errorSource, onRetry, onReset }: ErrorStepProps) {
-  const sfx = useSfx();
-
   const displayMessage = message || 'An unexpected error occurred.';
   const retryLabel = getRetryLabel(recoveryAction, errorSource);
   const showDetectHints = errorSource === 'detect' && !message?.includes('firmware');
 
   return (
-    <TerminalPanel title="ERROR">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-        <div style={{ color: 'var(--red-bright)', fontWeight: 700, marginBottom: '8px' }}>
-          [!!] ERROR
+    <Card style={{ maxWidth: '440px', width: '100%', textAlign: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+        {/* Error icon */}
+        <div style={{
+          width: '56px',
+          height: '56px',
+          borderRadius: '50%',
+          background: 'var(--error)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '28px',
+          color: '#FFFFFF',
+          fontWeight: 700,
+        }}>
+          !
         </div>
 
-        <div style={{ color: 'var(--red-bright)', marginBottom: showDetectHints ? '12px' : '16px' }}>
-          {displayMessage}
+        <div>
+          <div style={{
+            fontSize: '18px',
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            marginBottom: 'var(--space-1)',
+          }}>
+            Something Went Wrong
+          </div>
         </div>
+
+        <InlineNotice variant="error" style={{ width: '100%', textAlign: 'left' }}>
+          {displayMessage}
+        </InlineNotice>
 
         {showDetectHints && (
-          <div style={{ marginBottom: '16px', fontSize: '12px', lineHeight: '1.8' }}>
-            <div style={{ color: 'var(--green-mid)', marginBottom: '4px' }}>
-              [?] Troubleshooting:
+          <div style={{
+            width: '100%',
+            textAlign: 'left',
+            background: 'var(--bg-secondary)',
+            borderRadius: 'var(--radius-md)',
+            padding: 'var(--space-3) var(--space-4)',
+          }}>
+            <div style={{
+              fontSize: '13px',
+              fontWeight: 500,
+              color: 'var(--text-secondary)',
+              marginBottom: 'var(--space-2)',
+            }}>
+              Troubleshooting
             </div>
             {DETECT_HINTS.map((hint, i) => (
-              <div key={i} style={{ color: 'var(--green-dim)', paddingLeft: '12px' }}>
-                {`${i + 1}. ${hint}`}
+              <div key={i} style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                lineHeight: '1.6',
+                paddingLeft: 'var(--space-2)',
+              }}>
+                {i + 1}. {hint}
               </div>
             ))}
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           {recoverable && (
-            <button
-              onClick={() => { sfx.action(); onRetry(); }}
-              style={{
-                background: 'var(--bg-void)',
-                color: 'var(--amber)',
-                border: '2px solid var(--amber)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '13px',
-                fontWeight: 600,
-                padding: '6px 20px',
-                cursor: 'pointer',
-              }}
-              onMouseEnter={(e) => {
-                sfx.hover();
-                e.currentTarget.style.background = 'rgba(255, 184, 0, 0.08)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--bg-void)';
-              }}
-            >
+            <Button variant="secondary" size="sm" onClick={onRetry}>
               {retryLabel}
-            </button>
+            </Button>
           )}
-
-          <button
-            onClick={() => { sfx.action(); onReset(); }}
-            style={{
-              background: 'var(--bg-void)',
-              color: 'var(--green-bright)',
-              border: '2px solid var(--green-bright)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '13px',
-              fontWeight: 600,
-              padding: '6px 20px',
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.background = 'var(--green-ghost)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-            }}
-          >
-            RESET
-          </button>
+          <Button variant="primary" size="sm" onClick={onReset}>
+            Reset
+          </Button>
         </div>
       </div>
-    </TerminalPanel>
+    </Card>
   );
 }

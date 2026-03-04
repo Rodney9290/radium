@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use serde::Serialize;
@@ -6,8 +6,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::cards::types::{AutopwnEvent, BlankType, CardType, ProcessPhase, RecoveryAction};
 use crate::error::AppError;
-use crate::pm3::connection::HfOperationState;
-use crate::pm3::{command_builder, connection, output_parser};
+use crate::pm3::session::Pm3Session;
+use crate::pm3::{command_builder, output_parser};
 use crate::state::{WizardAction, WizardMachine, WizardState};
 
 /// Payload emitted as `hf-progress` events during autopwn.
@@ -27,14 +27,14 @@ struct HfProgressPayload {
 pub async fn hf_autopwn(
     app: AppHandle,
     machine: State<'_, Mutex<WizardMachine>>,
-    hf_state: State<'_, HfOperationState>,
+    session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
-    // Extract port + card_type from current state, then transition to HfProcessing
-    let (port, card_type) = {
+    // Extract card_type from current state, then transition to HfProcessing
+    let card_type = {
         let mut m = machine.lock().map_err(|e| {
             AppError::CommandFailed(format!("State lock poisoned: {}", e))
         })?;
-        let (port, card_type) = match &m.current {
+        let card_type = match &m.current {
             WizardState::CardIdentified { card_type, .. } => {
                 match card_type {
                     CardType::MifareClassic1K | CardType::MifareClassic4K => {}
@@ -45,10 +45,7 @@ pub async fn hf_autopwn(
                         )));
                     }
                 }
-                let port = m.port.clone().ok_or_else(|| {
-                    AppError::InvalidTransition("No port in machine state".to_string())
-                })?;
-                (port, card_type.clone())
+                card_type.clone()
             }
             _ => {
                 return Err(AppError::InvalidTransition(
@@ -57,125 +54,136 @@ pub async fn hf_autopwn(
             }
         };
         m.transition(WizardAction::StartHfProcess)?;
-        (port, card_type)
+        card_type
     };
 
     let cmd = command_builder::build_hf_autopwn(&card_type);
     let start_time = Instant::now();
 
-    // Progress state tracked across lines via the closure
-    let mut current_phase = ProcessPhase::KeyCheck;
-    let mut keys_found: u32 = 0;
-    // Initialize keys_total based on card type so individual KeyFound events
-    // produce visible progress (Classic 1K = 16 sectors × 2 keys = 32,
-    // Classic 4K = 40 sectors × 2 keys = 80). Without this, keys_total stays 0
-    // until the summary line "found X/Y keys (D)" which arrives at the END.
-    let mut keys_total: u32 = match card_type {
+    // Shared progress state between the streaming closure and post-await code.
+    // Wrapped in Arc<Mutex<>> because the closure is `move` + `Send`.
+    struct ProgressState {
+        phase: ProcessPhase,
+        keys_found: u32,
+        keys_total: u32,
+        dump_file: Option<String>,
+        dump_complete: bool,
+        dump_partial: bool,
+    }
+
+    let initial_keys_total: u32 = match card_type {
         CardType::MifareClassic4K => 80,
         _ => 32,
     };
-    let mut dump_file: Option<String> = None;
-    let mut dump_complete = false;
-    let mut dump_partial = false;
+
+    let progress = Arc::new(Mutex::new(ProgressState {
+        phase: ProcessPhase::KeyCheck,
+        keys_found: 0,
+        keys_total: initial_keys_total,
+        dump_file: None,
+        dump_complete: false,
+        dump_partial: false,
+    }));
 
     let app_for_closure = app.clone();
+    let progress_for_closure = progress.clone();
 
     // Emit initial progress so the frontend shows 0/32 (or 0/80) immediately
     let _ = app.emit(
         "hf-progress",
         HfProgressPayload {
-            phase: format!("{:?}", current_phase),
+            phase: format!("{:?}", ProcessPhase::KeyCheck),
             keys_found: 0,
-            keys_total,
+            keys_total: initial_keys_total,
             elapsed_secs: 0,
         },
     );
 
     // Run streaming command with per-line autopwn parsing (1h timeout for hardnested)
-    let result = connection::run_command_streaming(
-        &app,
-        &port,
-        &cmd,
-        3600,
-        &hf_state,
-        |line| {
-            if let Some(event) = output_parser::parse_autopwn_line(line) {
-                let elapsed = start_time.elapsed().as_secs() as u32;
+    let result = session
+        .run_command_streaming(
+            &cmd,
+            3600,
+            move |line: &str| {
+                if let Some(event) = output_parser::parse_autopwn_line(line) {
+                    let elapsed = start_time.elapsed().as_secs() as u32;
+                    let mut st = progress_for_closure.lock().unwrap();
 
-                match &event {
-                    AutopwnEvent::DictionaryProgress { found, total } => {
-                        current_phase = ProcessPhase::KeyCheck;
-                        keys_found = *found;
-                        keys_total = *total;
-                    }
-                    AutopwnEvent::KeyFound { .. } => {
-                        keys_found += 1;
-                    }
-                    AutopwnEvent::DarksideStarted => {
-                        current_phase = ProcessPhase::Darkside;
-                    }
-                    AutopwnEvent::NestedStarted => {
-                        current_phase = ProcessPhase::Nested;
-                    }
-                    AutopwnEvent::HardnestedStarted => {
-                        current_phase = ProcessPhase::Hardnested;
-                    }
-                    AutopwnEvent::StaticnestedStarted => {
-                        current_phase = ProcessPhase::StaticNested;
-                    }
-                    AutopwnEvent::DumpComplete { file_path } => {
-                        dump_complete = true;
-                        if !file_path.is_empty() {
-                            dump_file = Some(file_path.clone());
+                    match &event {
+                        AutopwnEvent::DictionaryProgress { found, total } => {
+                            st.phase = ProcessPhase::KeyCheck;
+                            st.keys_found = *found;
+                            st.keys_total = *total;
                         }
-                        current_phase = ProcessPhase::Dumping;
-                    }
-                    AutopwnEvent::DumpPartial { file_path } => {
-                        dump_partial = true;
-                        if !file_path.is_empty() {
-                            dump_file = Some(file_path.clone());
+                        AutopwnEvent::KeyFound { .. } => {
+                            st.keys_found += 1;
                         }
-                        current_phase = ProcessPhase::Dumping;
+                        AutopwnEvent::DarksideStarted => {
+                            st.phase = ProcessPhase::Darkside;
+                        }
+                        AutopwnEvent::NestedStarted => {
+                            st.phase = ProcessPhase::Nested;
+                        }
+                        AutopwnEvent::HardnestedStarted => {
+                            st.phase = ProcessPhase::Hardnested;
+                        }
+                        AutopwnEvent::StaticnestedStarted => {
+                            st.phase = ProcessPhase::StaticNested;
+                        }
+                        AutopwnEvent::DumpComplete { file_path } => {
+                            st.dump_complete = true;
+                            if !file_path.is_empty() {
+                                st.dump_file = Some(file_path.clone());
+                            }
+                            st.phase = ProcessPhase::Dumping;
+                        }
+                        AutopwnEvent::DumpPartial { file_path } => {
+                            st.dump_partial = true;
+                            if !file_path.is_empty() {
+                                st.dump_file = Some(file_path.clone());
+                            }
+                            st.phase = ProcessPhase::Dumping;
+                        }
+                        AutopwnEvent::Failed { .. } | AutopwnEvent::Finished { .. } => {}
                     }
-                    AutopwnEvent::Failed { .. } | AutopwnEvent::Finished { .. } => {}
+
+                    // Emit progress event to frontend
+                    let _ = app_for_closure.emit(
+                        "hf-progress",
+                        HfProgressPayload {
+                            phase: format!("{:?}", st.phase),
+                            keys_found: st.keys_found,
+                            keys_total: st.keys_total,
+                            elapsed_secs: elapsed,
+                        },
+                    );
                 }
+            },
+        )
+        .await;
 
-                // Emit progress event to frontend
-                let _ = app_for_closure.emit(
-                    "hf-progress",
-                    HfProgressPayload {
-                        phase: format!("{:?}", current_phase),
-                        keys_found,
-                        keys_total,
-                        elapsed_secs: elapsed,
-                    },
-                );
-            }
-        },
-    )
-    .await;
+    // Read final state from the shared progress
+    let st = progress.lock().unwrap();
 
     match result {
         Ok(_output) => {
-            // Store dump file path in HfOperationState for the write phase
-            if let Some(ref path) = dump_file {
-                if let Ok(mut lock) = hf_state.dump_path.lock() {
-                    *lock = Some(path.clone());
-                }
+            // Store dump file path in session for the write phase
+            if let Some(ref path) = st.dump_file {
+                session.set_dump_path(Some(path.clone()));
             }
 
-            let dump_info = if dump_complete {
+            let dump_info = if st.dump_complete {
                 format!(
                     "All keys recovered ({}/{}). Full dump saved.",
-                    keys_found, keys_total
+                    st.keys_found, st.keys_total
                 )
-            } else if dump_partial {
+            } else if st.dump_partial {
                 format!(
                     "Partial key recovery ({}/{}). Partial dump saved.",
-                    keys_found, keys_total
+                    st.keys_found, st.keys_total
                 )
-            } else if keys_found > 0 {
-                format!("Keys recovered: {}/{}.", keys_found, keys_total)
+            } else if st.keys_found > 0 {
+                format!("Keys recovered: {}/{}.", st.keys_found, st.keys_total)
             } else {
                 "Key recovery completed.".to_string()
             };
@@ -206,24 +214,9 @@ pub async fn hf_autopwn(
 /// Cancel a running HF operation (autopwn, dump, write) by killing the child process.
 #[tauri::command]
 pub async fn cancel_hf_operation(
-    hf_state: tauri::State<'_, HfOperationState>,
+    session: State<'_, Pm3Session>,
 ) -> Result<(), AppError> {
-    let child = {
-        let mut lock = hf_state.child.lock().map_err(|e| {
-            AppError::CommandFailed(format!("HF state lock poisoned: {}", e))
-        })?;
-        lock.take()
-    };
-
-    match child {
-        Some(child) => {
-            child.kill().map_err(|e| {
-                AppError::CommandFailed(format!("Failed to kill HF process: {}", e))
-            })?;
-            Ok(())
-        }
-        None => Ok(()),
-    }
+    session.cancel_current()
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +224,7 @@ pub async fn cancel_hf_operation(
 // ---------------------------------------------------------------------------
 
 /// Write a dump to a magic blank card. Selects the correct write workflow based
-/// on `blank_type`. The dump file path is retrieved from `HfOperationState`
+/// on `blank_type`. The dump file path is retrieved from the session
 /// (stored by `hf_autopwn` or `hf_dump`).
 ///
 /// Transitions: BlankDetected -> Writing -> Verifying (or Error).
@@ -240,15 +233,14 @@ pub async fn cancel_hf_operation(
 /// doesn't persist `card_data` after state transitions.
 #[tauri::command]
 pub async fn hf_write_clone(
-    app: AppHandle,
     source_uid: String,
     card_type: CardType,
     blank_type: BlankType,
     machine: State<'_, Mutex<WizardMachine>>,
-    hf_state: State<'_, HfOperationState>,
+    session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
-    // Extract port from machine, validate state
-    let port = {
+    // Validate state
+    {
         let mut m = machine.lock().map_err(|e| {
             AppError::CommandFailed(format!("State lock poisoned: {}", e))
         })?;
@@ -260,45 +252,36 @@ pub async fn hf_write_clone(
                 ));
             }
         }
-        let port = m.port.clone().ok_or_else(|| {
-            AppError::InvalidTransition("No port in machine state".to_string())
-        })?;
         m.transition(WizardAction::StartWrite)?;
-        port
     };
 
-    // Get dump file path from HfOperationState (set by hf_autopwn or hf_dump)
-    let dump_path = {
-        let lock = hf_state.dump_path.lock().map_err(|e| {
-            AppError::CommandFailed(format!("HF state lock poisoned: {}", e))
-        })?;
-        lock.clone().ok_or_else(|| {
-            AppError::CommandFailed("No dump file available. Run key recovery first.".to_string())
-        })?
-    };
+    // Get dump file path from session (set by hf_autopwn or hf_dump)
+    let dump_path = session.get_dump_path().ok_or_else(|| {
+        AppError::CommandFailed("No dump file available. Run key recovery first.".to_string())
+    })?;
 
     // Run the write workflow, catching errors to report via FSM
     let result = match blank_type {
         BlankType::MagicMifareGen1a => {
-            write_gen1a(&app, &port, &dump_path, &machine).await
+            write_gen1a(session.inner(), &dump_path, &machine).await
         }
         BlankType::MagicMifareGen2 => {
-            write_gen2(&app, &port, &dump_path, &source_uid, &card_type, &machine).await
+            write_gen2(session.inner(), &dump_path, &source_uid, &card_type, &machine).await
         }
         BlankType::MagicMifareGen3 => {
-            write_gen3(&app, &port, &dump_path, &source_uid, &card_type, &machine).await
+            write_gen3(session.inner(), &dump_path, &source_uid, &card_type, &machine).await
         }
         BlankType::MagicMifareGen4GTU => {
-            write_gen4_gtu(&app, &port, &dump_path, &machine).await
+            write_gen4_gtu(session.inner(), &dump_path, &machine).await
         }
         BlankType::MagicMifareGen4GDM => {
-            write_gen4_gdm(&app, &port, &dump_path, &machine).await
+            write_gen4_gdm(session.inner(), &dump_path, &machine).await
         }
         BlankType::MagicUltralight => {
-            write_ultralight(&app, &port, &dump_path, &machine).await
+            write_ultralight(session.inner(), &dump_path, &machine).await
         }
         BlankType::IClassBlank => {
-            write_iclass(&app, &port, &dump_path, &machine).await
+            write_iclass(session.inner(), &dump_path, &machine).await
         }
         _ => {
             Err(AppError::CommandFailed(format!(
@@ -333,16 +316,15 @@ pub async fn hf_write_clone(
 /// Transitions: CardIdentified -> HfProcessing -> HfDumpReady (or Error).
 #[tauri::command]
 pub async fn hf_dump(
-    app: AppHandle,
     machine: State<'_, Mutex<WizardMachine>>,
-    hf_state: State<'_, HfOperationState>,
+    session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
-    // Extract port + card_type, transition to HfProcessing
-    let (port, card_type) = {
+    // Extract card_type, transition to HfProcessing
+    let card_type = {
         let mut m = machine.lock().map_err(|e| {
             AppError::CommandFailed(format!("State lock poisoned: {}", e))
         })?;
-        let (port, card_type) = match &m.current {
+        let card_type = match &m.current {
             WizardState::CardIdentified { card_type, .. } => {
                 match card_type {
                     CardType::MifareUltralight | CardType::NTAG | CardType::IClass => {}
@@ -353,10 +335,7 @@ pub async fn hf_dump(
                         )));
                     }
                 }
-                let port = m.port.clone().ok_or_else(|| {
-                    AppError::InvalidTransition("No port in machine state".to_string())
-                })?;
-                (port, card_type.clone())
+                card_type.clone()
             }
             _ => {
                 return Err(AppError::InvalidTransition(
@@ -365,7 +344,7 @@ pub async fn hf_dump(
             }
         };
         m.transition(WizardAction::StartHfProcess)?;
-        (port, card_type)
+        card_type
     };
 
     // Select dump command based on card type
@@ -374,18 +353,16 @@ pub async fn hf_dump(
         _ => command_builder::build_mfu_dump(), // UL + NTAG
     };
 
-    let result = connection::run_command(&app, &port, cmd).await;
+    let result = session.run_command(cmd).await;
 
     match result {
         Ok(output) => {
             // Extract dump file path from output
             let dump_file = output_parser::extract_dump_file_path(&output);
 
-            // Store dump path in HfOperationState for the write phase
+            // Store dump path in session for the write phase
             if let Some(ref path) = dump_file {
-                if let Ok(mut lock) = hf_state.dump_path.lock() {
-                    *lock = Some(path.clone());
-                }
+                session.set_dump_path(Some(path.clone()));
             }
 
             let dump_info = match &card_type {
@@ -421,24 +398,22 @@ pub async fn hf_dump(
 
 /// Gen1a: single `hf mf cload` via magic wakeup backdoor.
 async fn write_gen1a(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(app, machine, 0.3, Some(1), Some(2))?;
+    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
 
     let cmd = command_builder::build_mf_cload(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 /// Gen2/CUID: config force -> wrbl0 -> restore -> config reset.
 async fn write_gen2(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     _source_uid: &str,
     _card_type: &CardType,
@@ -447,35 +422,34 @@ async fn write_gen2(
     let total: u16 = 5;
 
     // Step 1: Force 14a config to allow block 0 write
-    update_write_progress(app, machine, 0.1, Some(1), Some(total))?;
+    update_write_progress(session.app(), machine, 0.1, Some(1), Some(total))?;
     let cmd = command_builder::build_mf_gen2_config_force();
-    connection::run_command(app, port, cmd).await?;
+    session.run_command(cmd).await?;
 
     // Step 2: Read block 0 from dump and force-write it
-    update_write_progress(app, machine, 0.3, Some(2), Some(total))?;
+    update_write_progress(session.app(), machine, 0.3, Some(2), Some(total))?;
     let block0 = read_block0_from_dump(dump_path)?;
     let cmd = command_builder::build_mf_wrbl0("FFFFFFFFFFFF", &block0);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
     // Step 3: Restore all blocks from dump
-    update_write_progress(app, machine, 0.6, Some(3), Some(total))?;
+    update_write_progress(session.app(), machine, 0.6, Some(3), Some(total))?;
     let cmd = command_builder::build_mf_restore(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
     // Step 4: Reset 14a config to standard
-    update_write_progress(app, machine, 0.85, Some(4), Some(total))?;
+    update_write_progress(session.app(), machine, 0.85, Some(4), Some(total))?;
     let cmd = command_builder::build_mf_gen2_config_reset();
-    connection::run_command(app, port, cmd).await?;
+    session.run_command(cmd).await?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 /// Gen3: gen3uid -> gen3blk -> restore.
 async fn write_gen3(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     source_uid: &str,
     _card_type: &CardType,
@@ -484,92 +458,88 @@ async fn write_gen3(
     let total: u16 = 4;
 
     // Step 1: Set UID via APDU
-    update_write_progress(app, machine, 0.1, Some(1), Some(total))?;
+    update_write_progress(session.app(), machine, 0.1, Some(1), Some(total))?;
     // Extract UID without spaces/colons for gen3uid command
     let clean_uid: String = source_uid.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     let cmd = command_builder::build_mf_gen3uid(&clean_uid);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
     // Step 2: Write block 0 via APDU
-    update_write_progress(app, machine, 0.35, Some(2), Some(total))?;
+    update_write_progress(session.app(), machine, 0.35, Some(2), Some(total))?;
     let block0 = read_block0_from_dump(dump_path)?;
     let cmd = command_builder::build_mf_gen3blk(&block0);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
     // Step 3: Restore all blocks from dump
-    update_write_progress(app, machine, 0.65, Some(3), Some(total))?;
+    update_write_progress(session.app(), machine, 0.65, Some(3), Some(total))?;
     let cmd = command_builder::build_mf_restore(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 /// Gen4 GTU/UMC: single `hf mf gload` (GTU-specific file load).
 async fn write_gen4_gtu(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(app, machine, 0.3, Some(1), Some(2))?;
+    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
 
     let cmd = command_builder::build_mf_gload(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 /// Gen4 GDM: uses `hf mf cload` via Gen1a backdoor (factory default 7AFF
 /// has Gen1a enabled). Single command instead of block-by-block gdmsetblk.
 async fn write_gen4_gdm(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(app, machine, 0.3, Some(1), Some(2))?;
+    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
 
     let cmd = command_builder::build_mf_cload(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 /// UL/NTAG: single `hf mfu restore` with special pages + engineering mode.
 async fn write_ultralight(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(app, machine, 0.3, Some(1), Some(2))?;
+    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
 
     let cmd = command_builder::build_mfu_restore(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 /// iCLASS: single `hf iclass restore` with default key (key index 0).
 async fn write_iclass(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     dump_path: &str,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(app, machine, 0.3, Some(1), Some(2))?;
+    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
 
     let cmd = command_builder::build_iclass_restore(dump_path);
-    let output = connection::run_command(app, port, &cmd).await?;
+    let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
 
-    finish_write(app, machine).await
+    finish_write(session, machine).await
 }
 
 // ---------------------------------------------------------------------------
@@ -596,10 +566,10 @@ fn read_block0_from_dump(dump_path: &str) -> Result<String, AppError> {
 
 /// Transition FSM: Writing -> Verifying (write finished).
 async fn finish_write(
-    app: &AppHandle,
+    session: &Pm3Session,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(app, machine, 1.0, None, None)?;
+    update_write_progress(session.app(), machine, 1.0, None, None)?;
 
     let mut m = machine.lock().map_err(|e| {
         AppError::CommandFailed(format!("State lock poisoned: {}", e))
@@ -686,15 +656,14 @@ fn report_error(
 /// Transitions: Verifying -> VerificationComplete.
 #[tauri::command]
 pub async fn hf_verify_clone(
-    app: AppHandle,
     source_uid: String,
     _card_type: CardType,
     blank_type: BlankType,
     machine: State<'_, Mutex<WizardMachine>>,
-    hf_state: State<'_, HfOperationState>,
+    session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
     // Guard: must be in Verifying state
-    let port = {
+    {
         let m = machine.lock().map_err(|e| {
             AppError::CommandFailed(format!("State lock poisoned: {}", e))
         })?;
@@ -707,14 +676,11 @@ pub async fn hf_verify_clone(
                 )));
             }
         }
-        m.port.clone().ok_or_else(|| {
-            AppError::InvalidTransition("No port in machine state".to_string())
-        })?
     };
 
     // Step 1: hf search — confirm card responds and extract UID
     let search_output =
-        connection::run_command(&app, &port, command_builder::build_hf_search()).await;
+        session.run_command(command_builder::build_hf_search()).await;
 
     let uid_match = match &search_output {
         Ok(output) => {
@@ -754,10 +720,8 @@ pub async fn hf_verify_clone(
         BlankType::MagicMifareGen1a => {
             // Gen1a: read all blocks via backdoor (no keys needed)
             verify_readback(
-                &app,
-                &port,
+                session.inner(),
                 command_builder::build_mf_cview(),
-                &hf_state,
                 16,
             )
             .await
@@ -768,10 +732,8 @@ pub async fn hf_verify_clone(
         | BlankType::MagicMifareGen4GDM => {
             // Gen2/Gen3/Gen4: read back using recovered keys
             verify_readback(
-                &app,
-                &port,
+                session.inner(),
                 command_builder::build_mf_dump(),
-                &hf_state,
                 16,
             )
             .await
@@ -779,10 +741,8 @@ pub async fn hf_verify_clone(
         BlankType::MagicUltralight => {
             // UL/NTAG: dump pages and compare
             verify_readback(
-                &app,
-                &port,
+                session.inner(),
                 command_builder::build_mfu_dump(),
-                &hf_state,
                 4,
             )
             .await
@@ -790,10 +750,8 @@ pub async fn hf_verify_clone(
         BlankType::IClassBlank => {
             // iCLASS: dump blocks and compare
             verify_readback(
-                &app,
-                &port,
+                session.inner(),
                 command_builder::build_iclass_dump(),
-                &hf_state,
                 8,
             )
             .await
@@ -817,13 +775,11 @@ pub async fn hf_verify_clone(
 /// Returns empty vec on success, vec of mismatched block indices on failure.
 /// Readback errors are non-fatal — UID already matched as the primary check.
 async fn verify_readback(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     readback_cmd: &str,
-    hf_state: &State<'_, HfOperationState>,
     block_size: usize,
 ) -> Vec<u16> {
-    let output = match connection::run_command(app, port, readback_cmd).await {
+    let output = match session.run_command(readback_cmd).await {
         Ok(o) => o,
         Err(_) => return vec![], // Readback failed, fall back to UID-only
     };
@@ -835,7 +791,7 @@ async fn verify_readback(
 
     // Try dump file comparison if both original and readback files are available
     let readback_path = output_parser::extract_dump_file_path(&output);
-    let original_path = hf_state.dump_path.lock().ok().and_then(|l| l.clone());
+    let original_path = session.get_dump_path();
 
     match (original_path, readback_path) {
         (Some(ref orig), Some(ref readback)) => {

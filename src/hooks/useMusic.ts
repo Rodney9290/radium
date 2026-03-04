@@ -1,19 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import musicSrc from '../assets/audio/phosphor.mp3';
-
-const STORAGE_KEY = 'phosphor-music-enabled';
-
-function getInitial(): boolean {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === null ? true : stored === '1';
-  } catch {
-    return true;
-  }
-}
+import { useEffect, useRef } from 'react';
+import { useSettings } from './useSettings';
+import musicSrc from '../assets/audio/radium.mp3';
 
 export function useMusic() {
-  const [enabled, setEnabled] = useState(getInitial);
+  const { settings, updateSettings } = useSettings();
+  const enabled = settings.backgroundMusic;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const startedRef = useRef(false);
 
@@ -31,7 +22,7 @@ export function useMusic() {
 
   // Start playback on first user interaction (browser autoplay policy)
   useEffect(() => {
-    if (startedRef.current) return;
+    if (startedRef.current || !enabled) return;
 
     const tryPlay = () => {
       if (!enabled || !audioRef.current || startedRef.current) return;
@@ -42,10 +33,8 @@ export function useMusic() {
       });
     };
 
-    // Try immediately (works if user already interacted)
     tryPlay();
 
-    // Also listen for first click/keydown
     const handler = () => {
       tryPlay();
       if (startedRef.current) {
@@ -74,7 +63,6 @@ export function useMusic() {
   }, [enabled]);
 
   // Resilience: periodically check if audio was paused unexpectedly
-  // (WebView2 on Windows can suspend audio during long async operations)
   useEffect(() => {
     if (!enabled) return;
     const check = setInterval(() => {
@@ -86,15 +74,9 @@ export function useMusic() {
     return () => clearInterval(check);
   }, [enabled]);
 
-  const toggle = useCallback(() => {
-    setEnabled(prev => {
-      const next = !prev;
-      try {
-        localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
-      } catch {}
-      return next;
-    });
-  }, []);
+  const toggle = () => {
+    updateSettings({ backgroundMusic: !enabled });
+  };
 
   return { enabled, toggle };
 }

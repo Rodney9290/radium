@@ -1,59 +1,66 @@
-import { useSfx } from '../../hooks/useSfx';
+import { Badge } from '../shared/Badge';
+import { Button } from '../shared/Button';
+import type { DeviceCapabilities, ProxmarkPlatform } from '../../machines/types';
+
+const PLATFORM_LABELS: Record<ProxmarkPlatform, string> = {
+  Easy: 'PM3 Easy',
+  RDV4: 'RDV4',
+  RDV4BT: 'RDV4 + BT',
+  ICopyX: 'iCopy-X',
+  Generic256: 'PM3 256K',
+};
 
 interface TopBarProps {
   connected: boolean;
+  capabilities?: DeviceCapabilities | null;
   onDisconnect?: () => void;
 }
 
-export function TopBar({ connected, onDisconnect }: TopBarProps) {
-  const sfx = useSfx();
-
+export function TopBar({ connected, capabilities, onDisconnect }: TopBarProps) {
   return (
     <div
       style={{
-        height: '32px',
+        height: '48px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 12px',
-        background: 'var(--bg-panel)',
-        borderBottom: '1px solid var(--green-dim)',
-        fontFamily: 'var(--font-mono)',
-        fontSize: '13px',
-        zIndex: 10,
-        position: 'relative',
+        padding: '0 var(--space-4)',
+        background: 'var(--bg-primary)',
+        borderBottom: '1px solid var(--border-secondary)',
       }}
     >
-      <div style={{ color: 'var(--green-mid)', fontWeight: 600 }}>
-        PHOSPHOR v1.1.0
+      {/* Left: App title */}
+      <div
+        style={{
+          fontSize: '16px',
+          fontWeight: 600,
+          color: 'var(--text-primary)',
+          letterSpacing: '-0.02em',
+        }}
+      >
+        Radium
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div
-          style={{
-            color: connected ? 'var(--green-bright)' : 'var(--red-bright)',
-            fontWeight: 500,
-          }}
-        >
-          {connected ? '[PM3:CONNECTED]' : '[PM3:DISCONNECTED]'}
-        </div>
+
+      {/* Center: Connection status + device platform */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <Badge
+          variant={connected ? 'success' : 'neutral'}
+          label={connected ? 'Connected' : 'Disconnected'}
+        />
+        {connected && capabilities && (
+          <Badge
+            variant="info"
+            label={PLATFORM_LABELS[capabilities.platform] ?? capabilities.platform}
+          />
+        )}
+      </div>
+
+      {/* Right: Disconnect button */}
+      <div style={{ minWidth: '100px', display: 'flex', justifyContent: 'flex-end' }}>
         {connected && onDisconnect && (
-          <div
-            onClick={() => { sfx.click(); onDisconnect(); }}
-            style={{
-              color: 'var(--green-dim)',
-              cursor: 'pointer',
-              userSelect: 'none',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.color = 'var(--green-bright)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--green-dim)';
-            }}
-          >
-            [DISCONNECT]
-          </div>
+          <Button variant="ghost" size="sm" onClick={onDisconnect}>
+            Disconnect
+          </Button>
         )}
       </div>
     </div>

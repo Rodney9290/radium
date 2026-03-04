@@ -8,7 +8,7 @@ mod state;
 use std::sync::Mutex;
 
 use commands::firmware::FlashState;
-use pm3::connection::HfOperationState;
+use pm3::session::Pm3Session;
 use state::WizardMachine;
 use tauri::Manager;
 
@@ -27,13 +27,14 @@ pub fn run() {
             app.manage(database);
             app.manage(Mutex::new(WizardMachine::new()));
             app.manage(FlashState::new());
-            app.manage(HfOperationState::new());
+            app.manage(Pm3Session::new(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::wizard::get_wizard_state,
             commands::wizard::wizard_action,
             commands::device::detect_device,
+            commands::device::get_device_capabilities,
             commands::blank::detect_blank,
             commands::scan::scan_card,
             commands::write::write_clone,
@@ -55,7 +56,8 @@ pub fn run() {
             commands::hf_clone::hf_dump,
             commands::hf_clone::hf_verify_clone,
             commands::hf_clone::cancel_hf_operation,
+            commands::permissions::check_device_permissions,
         ])
         .run(tauri::generate_context!())
-        .expect("error running Phosphor");
+        .expect("error running Radium");
 }

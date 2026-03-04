@@ -1,7 +1,7 @@
 // Typed Tauri invoke wrappers for PM3 backend commands.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { WizardState, CloneRecord, BlankType, FirmwareCheckResult } from '../machines/types';
+import type { WizardState, CloneRecord, BlankType, FirmwareCheckResult, DeviceCapabilities } from '../machines/types';
 
 export interface SavedCard {
   id: number | null;
@@ -22,6 +22,14 @@ export interface SavedCard {
  */
 export async function detectDevice(): Promise<WizardState> {
   return invoke<WizardState>('detect_device');
+}
+
+/**
+ * Get cached device capabilities from the active session.
+ * Returns platform, features (external flash, smartcard, BT), and version info.
+ */
+export async function getDeviceCapabilities(): Promise<DeviceCapabilities> {
+  return invoke<DeviceCapabilities>('get_device_capabilities');
 }
 
 /**
@@ -266,6 +274,27 @@ export async function getSavedCards(): Promise<SavedCard[]> {
  */
 export async function deleteSavedCard(id: number): Promise<void> {
   return invoke<void>('delete_saved_card', { id });
+}
+
+// -- Permissions (Linux) -----------------------------------------------
+
+export interface PermissionCheck {
+  hasPermission: boolean;
+  userInDialout: boolean;
+  userInPlugdev: boolean;
+  udevRuleInstalled: boolean;
+  devicePath: string;
+  devicePermissions: string;
+  fixCommands: string[];
+}
+
+/**
+ * Check device permissions (primarily for Linux).
+ * Returns structured permission status with fix commands if needed.
+ * On non-Linux platforms, returns all-OK.
+ */
+export async function checkDevicePermissions(devicePath?: string): Promise<PermissionCheck> {
+  return invoke<PermissionCheck>('check_device_permissions', { devicePath });
 }
 
 // -- Raw PM3 Command ---------------------------------------------------

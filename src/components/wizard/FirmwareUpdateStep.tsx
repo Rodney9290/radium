@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
 import { ProgressBar } from '../shared/ProgressBar';
-import { useSfx } from '../../hooks/useSfx';
+import { InlineNotice } from '../shared/InlineNotice';
 
 interface FirmwareUpdateStepProps {
   step: 'CheckingFirmware' | 'FirmwareOutdated' | 'UpdatingFirmware' | 'RedetectingDevice';
@@ -17,23 +18,11 @@ interface FirmwareUpdateStepProps {
   onSelectVariant?: (variant: 'rdv4' | 'rdv4-bt' | 'generic') => void;
 }
 
-const VARIANT_OPTIONS: { id: 'rdv4' | 'rdv4-bt' | 'generic'; label: string }[] = [
-  { id: 'rdv4', label: 'PROXMARK3 RDV4' },
-  { id: 'rdv4-bt', label: 'RDV4 + BLUESHARK' },
-  { id: 'generic', label: 'PM3 EASY / CLONE' },
+const VARIANT_OPTIONS: { id: 'rdv4' | 'rdv4-bt' | 'generic'; label: string; description: string }[] = [
+  { id: 'rdv4', label: 'Proxmark3 RDV4', description: 'Standard RDV4 hardware' },
+  { id: 'rdv4-bt', label: 'RDV4 + BlueShark', description: 'RDV4 with Bluetooth module' },
+  { id: 'generic', label: 'PM3 Easy / Clone', description: 'Generic or clone hardware' },
 ];
-
-const btnBase: React.CSSProperties = {
-  background: 'var(--bg-void)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '14px',
-  fontWeight: 600,
-  padding: '8px 24px',
-  textTransform: 'uppercase',
-  cursor: 'pointer',
-  border: '2px solid var(--green-bright)',
-  color: 'var(--green-bright)',
-};
 
 export function FirmwareUpdateStep({
   step,
@@ -48,7 +37,6 @@ export function FirmwareUpdateStep({
   onCancel,
   onSelectVariant,
 }: FirmwareUpdateStepProps) {
-  const sfx = useSfx();
   const [dots, setDots] = useState('');
 
   const isAnimated = step === 'CheckingFirmware' || step === 'UpdatingFirmware' || step === 'RedetectingDevice';
@@ -61,217 +49,201 @@ export function FirmwareUpdateStep({
     return () => clearInterval(timer);
   }, [isAnimated]);
 
+  // Checking firmware
   if (step === 'CheckingFirmware') {
     return (
-      <TerminalPanel title="FIRMWARE">
-        <div style={{ color: 'var(--amber)', fontSize: '14px' }}>
-          CHECKING FIRMWARE VERSION{dots}
+      <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'var(--bg-tertiary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '24px',
+          }}>
+            <span style={{ animation: 'spin 1.5s linear infinite' }}>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              &#x21BB;
+            </span>
+          </div>
+          <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Checking Firmware{dots}
+          </div>
         </div>
-      </TerminalPanel>
+      </Card>
     );
   }
 
+  // Re-detecting device after flash
   if (step === 'RedetectingDevice') {
     return (
-      <TerminalPanel title="FIRMWARE">
-        <div style={{ color: 'var(--amber)', fontSize: '14px' }}>
-          RE-DETECTING DEVICE{dots}
+      <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'var(--bg-tertiary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '24px',
+          }}>
+            <span style={{ animation: 'spin 1.5s linear infinite' }}>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              &#x21BB;
+            </span>
+          </div>
+          <div>
+            <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>
+              Re-detecting Device{dots}
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
+              Port may have changed after firmware update.
+            </div>
+          </div>
         </div>
-        <div style={{ color: 'var(--green-dim)', fontSize: '12px', marginTop: '8px' }}>
-          Port may have changed after firmware update.
-        </div>
-      </TerminalPanel>
+      </Card>
     );
   }
 
+  // Flashing firmware
   if (step === 'UpdatingFirmware') {
     return (
-      <TerminalPanel title="FIRMWARE UPDATE">
-        <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-          <div style={{ color: 'var(--amber)', marginBottom: '8px' }}>
-            FLASHING FIRMWARE{dots}
+      <Card title="Firmware Update" style={{ maxWidth: '420px', width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+            Flashing firmware{dots}
           </div>
 
-          <div style={{ marginBottom: '12px' }}>
-            <ProgressBar value={firmwareProgress} width={24} />
-          </div>
+          <ProgressBar value={firmwareProgress} />
 
           {firmwareMessage && (
-            <div style={{ color: 'var(--green-dim)', fontSize: '12px', marginBottom: '12px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>
               {firmwareMessage}
             </div>
           )}
 
-          <div style={{ color: 'var(--red-bright)', fontSize: '12px', marginBottom: '16px' }}>
-            [!!] DO NOT DISCONNECT THE DEVICE
-          </div>
+          <InlineNotice variant="error">
+            Do not disconnect the device during this process.
+          </InlineNotice>
 
-          <button
-            onClick={() => { sfx.action(); onCancel(); }}
-            style={{
-              ...btnBase,
-              border: '2px solid var(--red-bright)',
-              color: 'var(--red-bright)',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.background = 'rgba(255, 0, 51, 0.1)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-            }}
-          >
-            CANCEL FLASH
-          </button>
+          <Button variant="destructive" size="sm" onClick={onCancel}>
+            Cancel Flash
+          </Button>
         </div>
-      </TerminalPanel>
+      </Card>
     );
   }
 
-  // step === 'FirmwareOutdated' — variant picker when hardware is unknown
+  // Firmware outdated -- variant picker when hardware is unknown
   if (hardwareVariant === 'unknown' || !hardwareVariant) {
     return (
-      <TerminalPanel title="SELECT HARDWARE">
-        <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-          <div style={{ color: 'var(--amber)', marginBottom: '12px' }}>
-            [!] Firmware mismatch — hardware variant could not be detected automatically.
-          </div>
-          <div style={{ color: 'var(--green-dim)', fontSize: '12px', marginBottom: '16px' }}>
+      <Card title="Select Hardware" style={{ maxWidth: '420px', width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <InlineNotice variant="warning">
+            Firmware mismatch detected. Hardware variant could not be identified automatically.
+          </InlineNotice>
+
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
             Select your Proxmark3 model to flash the correct firmware:
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             {VARIANT_OPTIONS.map((opt) => (
-              <button
+              <Button
                 key={opt.id}
-                onClick={() => { sfx.action(); onSelectVariant?.(opt.id); }}
-                style={{
-                  ...btnBase,
-                  padding: '10px 16px',
-                  textAlign: 'left',
-                }}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.background = 'var(--green-ghost)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-void)';
-                }}
+                variant="secondary"
+                size="md"
+                fullWidth
+                onClick={() => onSelectVariant?.(opt.id)}
+                style={{ justifyContent: 'flex-start', textAlign: 'left' }}
               >
-                {opt.label}
-              </button>
+                <div>
+                  <div style={{ fontWeight: 500 }}>{opt.label}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', fontWeight: 400 }}>{opt.description}</div>
+                </div>
+              </Button>
             ))}
           </div>
 
-          <button
-            onClick={() => { sfx.action(); onSkip(); }}
-            style={{
-              ...btnBase,
-              border: '2px solid var(--green-dim)',
-              color: 'var(--green-dim)',
-              opacity: 0.7,
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.opacity = '1';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '0.7';
-            }}
-          >
-            SKIP
-          </button>
+          <Button variant="ghost" size="sm" onClick={onSkip}>
+            Skip
+          </Button>
         </div>
-      </TerminalPanel>
+      </Card>
     );
   }
 
-  // step === 'FirmwareOutdated' — variant known, show update/skip
+  // Firmware outdated -- variant known, show update/skip
   return (
-    <TerminalPanel title="FIRMWARE MISMATCH">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-        <div style={{ color: 'var(--amber)', marginBottom: '12px' }}>
-          [!] Firmware version mismatch detected
-        </div>
+    <Card title="Firmware Mismatch" style={{ maxWidth: '440px', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <InlineNotice variant="warning">
+          Firmware version mismatch detected.
+        </InlineNotice>
 
-        <div style={{ marginBottom: '4px' }}>
-          <span style={{ color: 'var(--green-dim)' }}>Client:  </span>
-          <span style={{ color: 'var(--green-bright)' }}>{clientVersion ?? 'unknown'}</span>
-        </div>
-        <div style={{ marginBottom: '4px' }}>
-          <span style={{ color: 'var(--green-dim)' }}>Device:  </span>
-          <span style={{ color: 'var(--red-bright)' }}>{deviceFirmwareVersion ?? 'unknown'}</span>
-        </div>
-        <div style={{ marginBottom: '12px' }}>
-          <span style={{ color: 'var(--green-dim)' }}>HW:      </span>
-          <span style={{ color: 'var(--green-bright)' }}>{hardwareVariant}</span>
+        {/* Version comparison */}
+        <div style={{
+          background: 'var(--bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          padding: 'var(--space-3) var(--space-4)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+        }}>
+          <VersionRow label="Client" value={clientVersion ?? 'unknown'} variant="current" />
+          <VersionRow label="Device" value={deviceFirmwareVersion ?? 'unknown'} variant="outdated" />
+          <VersionRow label="Hardware" value={hardwareVariant} variant="current" />
         </div>
 
         {firmwarePathExists ? (
           <>
-            <div style={{ color: 'var(--green-dim)', fontSize: '12px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
               Updating firmware ensures all commands work correctly.
               This will flash fullimage.elf only (safe, non-bricking).
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                onClick={() => { sfx.action(); onUpdate(); }}
-                style={btnBase}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.background = 'var(--green-ghost)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-void)';
-                }}
-              >
-                UPDATE FIRMWARE
-              </button>
-              <button
-                onClick={() => { sfx.action(); onSkip(); }}
-                style={{
-                  ...btnBase,
-                  border: '2px solid var(--green-dim)',
-                  color: 'var(--green-dim)',
-                  opacity: 0.7,
-                }}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.opacity = '1';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.opacity = '0.7';
-                }}
-              >
-                SKIP
-              </button>
+            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <Button variant="primary" size="md" onClick={onUpdate}>
+                Update Firmware
+              </Button>
+              <Button variant="ghost" size="md" onClick={onSkip}>
+                Skip
+              </Button>
             </div>
           </>
         ) : (
           <>
-            <div style={{ color: 'var(--amber)', fontSize: '12px', marginBottom: '12px' }}>
-              [!] No bundled firmware for this hardware variant ({hardwareVariant}).
-              <br />
-              Flash manually via CLI: proxmark3 --flash --image fullimage.elf
-            </div>
+            <InlineNotice variant="warning">
+              No bundled firmware for this hardware variant ({hardwareVariant}).
+              Flash manually via CLI: <code style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>proxmark3 --flash --image fullimage.elf</code>
+            </InlineNotice>
 
-            <button
-              onClick={() => { sfx.action(); onSkip(); }}
-              style={btnBase}
-              onMouseEnter={(e) => {
-                sfx.hover();
-                e.currentTarget.style.background = 'var(--green-ghost)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--bg-void)';
-              }}
-            >
-              CONTINUE
-            </button>
+            <Button variant="primary" size="md" onClick={onSkip}>
+              Continue
+            </Button>
           </>
         )}
       </div>
-    </TerminalPanel>
+    </Card>
+  );
+}
+
+function VersionRow({ label, value, variant }: { label: string; value: string; variant: 'current' | 'outdated' }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+      <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
+      <span style={{
+        fontFamily: 'var(--font-mono)',
+        fontSize: '12px',
+        color: variant === 'outdated' ? 'var(--error)' : 'var(--text-primary)',
+      }}>
+        {value}
+      </span>
+    </div>
   );
 }

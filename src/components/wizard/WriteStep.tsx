@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { Card } from '../shared/Card';
 import { ProgressBar } from '../shared/ProgressBar';
-import { StepIndicator, type Step } from '../shared/StepIndicator';
 import type { BlankType, CardType } from '../../machines/types';
 
 interface WriteStepProps {
@@ -17,28 +16,33 @@ interface WriteStepProps {
 // T5577: 6 steps (detect, password check, wipe, verify wipe, clone, finalize)
 // EM4305: 5 steps (detect, wipe, verify wipe, clone, finalize)
 const T5577_PHASES: { label: string; start: number; end: number }[] = [
-  { label: 'DETECT BLANK', start: 0, end: 10 },
-  { label: 'PASSWORD CHECK', start: 10, end: 20 },
-  { label: 'WIPE', start: 20, end: 35 },
-  { label: 'VERIFY WIPE', start: 35, end: 50 },
-  { label: 'CLONE DATA', start: 50, end: 75 },
-  { label: 'FINALIZE', start: 75, end: 100 },
+  { label: 'Detect Blank', start: 0, end: 10 },
+  { label: 'Password Check', start: 10, end: 20 },
+  { label: 'Wipe', start: 20, end: 35 },
+  { label: 'Verify Wipe', start: 35, end: 50 },
+  { label: 'Clone Data', start: 50, end: 75 },
+  { label: 'Finalize', start: 75, end: 100 },
 ];
 
 const EM4305_PHASES: { label: string; start: number; end: number }[] = [
-  { label: 'DETECT BLANK', start: 0, end: 10 },
-  { label: 'WIPE', start: 10, end: 30 },
-  { label: 'VERIFY WIPE', start: 30, end: 50 },
-  { label: 'CLONE DATA', start: 50, end: 75 },
-  { label: 'FINALIZE', start: 75, end: 100 },
+  { label: 'Detect Blank', start: 0, end: 10 },
+  { label: 'Wipe', start: 10, end: 30 },
+  { label: 'Verify Wipe', start: 30, end: 50 },
+  { label: 'Clone Data', start: 50, end: 75 },
+  { label: 'Finalize', start: 75, end: 100 },
 ];
 
-function getPhaseSteps(progress: number, blankType?: BlankType | null): Step[] {
+interface PhaseStep {
+  label: string;
+  status: 'pending' | 'running' | 'done';
+}
+
+function getPhaseSteps(progress: number, blankType?: BlankType | null): PhaseStep[] {
   const phases = blankType === 'EM4305' ? EM4305_PHASES : T5577_PHASES;
 
-  return phases.map(({ label, start, end }): Step => {
+  return phases.map(({ label, start, end }): PhaseStep => {
     if (progress >= end) {
-      return { label, status: 'ok' };
+      return { label, status: 'done' };
     } else if (progress >= start) {
       return { label, status: 'running' };
     } else {
@@ -58,35 +62,87 @@ export function WriteStep({
   const steps = useMemo(() => getPhaseSteps(progress, blankType), [progress, blankType]);
 
   const blockInfo = currentBlock !== null && currentBlock !== undefined && totalBlocks
-    ? `Block ${currentBlock}/${totalBlocks}`
+    ? `Block ${currentBlock} of ${totalBlocks}`
     : null;
 
   return (
-    <TerminalPanel title="WRITING">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
+    <Card title="Writing" style={{ maxWidth: '420px', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
         {cardType && (
-          <div style={{ color: 'var(--green-dim)', marginBottom: '8px' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
             Cloning {cardType} to blank...
           </div>
         )}
 
-        <div style={{ marginBottom: '16px' }}>
-          <ProgressBar value={progress} width={24} />
+        {/* Progress bar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <ProgressBar value={progress} />
           {blockInfo && (
-            <span style={{ color: 'var(--green-dim)', fontSize: '12px', marginLeft: '12px' }}>
+            <div style={{
+              fontSize: '12px',
+              color: 'var(--text-tertiary)',
+              textAlign: 'center',
+            }}>
               {blockInfo}
-            </span>
+            </div>
           )}
         </div>
 
-        <StepIndicator steps={steps} />
+        {/* Phase steps */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+          {steps.map((step, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                fontSize: '13px',
+              }}
+            >
+              <span style={{
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 600,
+                flexShrink: 0,
+                background: step.status === 'done'
+                  ? 'var(--success)'
+                  : step.status === 'running'
+                    ? 'var(--accent)'
+                    : 'var(--bg-tertiary)',
+                color: step.status === 'pending'
+                  ? 'var(--text-tertiary)'
+                  : '#FFFFFF',
+              }}>
+                {step.status === 'done' ? '\u2713' : step.status === 'running' ? '\u2022' : (i + 1)}
+              </span>
+              <span style={{
+                color: step.status === 'pending' ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                fontWeight: step.status === 'running' ? 500 : 400,
+              }}>
+                {step.label}
+              </span>
+            </div>
+          ))}
+        </div>
 
         {isLoading && progress >= 100 && (
-          <div style={{ color: 'var(--green-bright)', marginTop: '12px', fontWeight: 600 }}>
-            [+] Write complete -- verifying...
+          <div style={{
+            fontSize: '14px',
+            fontWeight: 500,
+            color: 'var(--success)',
+            textAlign: 'center',
+            paddingTop: 'var(--space-2)',
+          }}>
+            Write complete -- verifying...
           </div>
         )}
       </div>
-    </TerminalPanel>
+    </Card>
   );
 }

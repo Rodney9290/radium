@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react';
+import { useSettings } from './useSettings';
 
 let audioCtx: AudioContext | null = null;
 
@@ -152,22 +153,26 @@ function playActionClick() {
 }
 
 export function useSfx() {
+  const { settings } = useSettings();
   const lastHoverRef = useRef(0);
 
   const hover = useCallback(() => {
+    if (!settings.soundEffects) return;
     const now = Date.now();
     if (now - lastHoverRef.current < 80) return;
     lastHoverRef.current = now;
     playHoverClick();
-  }, []);
+  }, [settings.soundEffects]);
 
   const click = useCallback(() => {
+    if (!settings.soundEffects) return;
     playButtonClick();
-  }, []);
+  }, [settings.soundEffects]);
 
   const action = useCallback(() => {
+    if (!settings.soundEffects) return;
     playActionClick();
-  }, []);
+  }, [settings.soundEffects]);
 
   return { hover, click, action };
 }

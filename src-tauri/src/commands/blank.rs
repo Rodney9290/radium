@@ -1,9 +1,10 @@
 use std::sync::Mutex;
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::cards::types::{BlankType, MagicGeneration, RecoveryAction};
 use crate::error::AppError;
-use crate::pm3::{command_builder, connection, output_parser};
+use crate::pm3::session::Pm3Session;
+use crate::pm3::{command_builder, output_parser};
 use crate::state::{WizardAction, WizardMachine, WizardState};
 
 /// Detect whether a blank card is present on the reader.
@@ -16,8 +17,8 @@ use crate::state::{WizardAction, WizardMachine, WizardState};
 /// (originally received during the `DeviceFound` event).
 #[tauri::command]
 pub async fn detect_blank(
-    app: AppHandle,
-    port: String,
+    session: State<'_, Pm3Session>,
+    _port: String,
     machine: State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
     // Validate we're in WaitingForBlank and extract expected blank type
@@ -37,33 +38,32 @@ pub async fn detect_blank(
 
     // Detect based on expected blank type
     match expected_blank {
-        BlankType::T5577 => detect_t5577(&app, &port, &machine).await,
-        BlankType::EM4305 => detect_em4305(&app, &port, &machine).await,
+        BlankType::T5577 => detect_t5577(session.inner(), &machine).await,
+        BlankType::EM4305 => detect_em4305(session.inner(), &machine).await,
         BlankType::MagicMifareGen1a
         | BlankType::MagicMifareGen2
         | BlankType::MagicMifareGen3
         | BlankType::MagicMifareGen4GTU
         | BlankType::MagicMifareGen4GDM => {
-            detect_magic_mifare(&app, &port, &machine, expected_blank).await
+            detect_magic_mifare(session.inner(), &machine, expected_blank).await
         }
-        BlankType::MagicUltralight => detect_magic_ultralight(&app, &port, &machine).await,
-        BlankType::IClassBlank => detect_iclass_blank(&app, &port, &machine).await,
+        BlankType::MagicUltralight => detect_magic_ultralight(session.inner(), &machine).await,
+        BlankType::IClassBlank => detect_iclass_blank(session.inner(), &machine).await,
     }
 }
 
 /// Run `lf t55xx detect` to confirm a T5577 is present, then `lf search` to
 /// check if the card already has data written to it.
 async fn detect_t5577(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    let output = connection::run_command(app, port, command_builder::build_t5577_detect()).await?;
+    let output = session.run_command(command_builder::build_t5577_detect()).await?;
     let status = output_parser::parse_t5577_detect(&output);
 
     if status.detected {
         // Check if the card already has data by running lf search
-        let existing_data_type = match connection::run_command(app, port, "lf search").await {
+        let existing_data_type = match session.run_command("lf search").await {
             Ok(search_output) => {
                 output_parser::parse_lf_search(&search_output)
                     .map(|(card_type, _)| format!("{:?}", card_type))
@@ -98,11 +98,10 @@ async fn detect_t5577(
 /// Checks for EM4x05-specific strings in the output to confirm the chip is present,
 /// rather than relying solely on the exit code.
 async fn detect_em4305(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    let result = connection::run_command(app, port, "lf em 4x05 info").await;
+    let result = session.run_command("lf em 4x05 info").await;
 
     let detected = match &result {
         Ok(output) => {
@@ -121,7 +120,7 @@ async fn detect_em4305(
 
     if detected {
         // Check if the card already has data
-        let existing_data_type = match connection::run_command(app, port, "lf search").await {
+        let existing_data_type = match session.run_command("lf search").await {
             Ok(search_output) => {
                 output_parser::parse_lf_search(&search_output)
                     .map(|(card_type, _)| format!("{:?}", card_type))
@@ -179,15 +178,12 @@ fn generation_to_blank(gen: &MagicGeneration) -> BlankType {
 /// Detect a MIFARE Classic magic card by running `hf 14a info` + `hf mf info`.
 /// Checks that an ISO 14443-A card is present, then detects magic generation.
 async fn detect_magic_mifare(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     machine: &State<'_, Mutex<WizardMachine>>,
     expected_blank: BlankType,
 ) -> Result<WizardState, AppError> {
     // Step 1: Check if any HF card is present via `hf 14a info`
-    let card_present = match connection::run_command(app, port, command_builder::build_hf_14a_info())
-        .await
-    {
+    let card_present = match session.run_command(command_builder::build_hf_14a_info()).await {
         Ok(output) => output_parser::is_hf_card_present(&output),
         Err(_) => false,
     };
@@ -207,9 +203,7 @@ async fn detect_magic_mifare(
     }
 
     // Step 2: Detect magic generation via `hf mf info`
-    let detected_gen = match connection::run_command(app, port, command_builder::build_hf_mf_info())
-        .await
-    {
+    let detected_gen = match session.run_command(command_builder::build_hf_mf_info()).await {
         Ok(output) => output_parser::parse_magic_detection(&output),
         Err(_) => None,
     };
@@ -220,7 +214,7 @@ async fn detect_magic_mifare(
         Some(ref gen) if Some(gen) == expected_gen.as_ref() => {
             // Perfect match — detected generation matches expected.
             // Check if card already has data written to it.
-            let existing_data = check_mifare_data(app, port, gen).await;
+            let existing_data = check_mifare_data(session, gen).await;
             let mut m = machine.lock().map_err(|e| {
                 AppError::CommandFailed(format!("State lock poisoned: {}", e))
             })?;
@@ -233,7 +227,7 @@ async fn detect_magic_mifare(
         Some(ref gen) => {
             // Card present with magic capabilities, but different generation.
             // Accept the detected type instead — user placed a different magic card.
-            let existing_data = check_mifare_data(app, port, gen).await;
+            let existing_data = check_mifare_data(session, gen).await;
             let actual_blank = generation_to_blank(gen);
             let mut m = machine.lock().map_err(|e| {
                 AppError::CommandFailed(format!("State lock poisoned: {}", e))
@@ -268,8 +262,7 @@ async fn detect_magic_mifare(
 /// For Gen2/Gen3/Gen4GTU: uses `hf mf rdbl` with default key.
 /// Returns `Some("MIFARE Classic")` if data found, `None` if card appears blank.
 async fn check_mifare_data(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     gen: &MagicGeneration,
 ) -> Option<String> {
     // Read block 4 (first data block of sector 1 — avoids manufacturer block 0)
@@ -284,7 +277,7 @@ async fn check_mifare_data(
         }
     };
 
-    match connection::run_command(app, port, &cmd).await {
+    match session.run_command(&cmd).await {
         Ok(output) => {
             let clean = output_parser::strip_ansi(&output);
             // PM3 outputs block data as hex on a line with `[=]` or `[+]` marker
@@ -338,11 +331,10 @@ fn has_nonzero_block_data(output: &str) -> bool {
 
 /// Detect a magic Ultralight/NTAG card via `hf mfu info`.
 async fn detect_magic_ultralight(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    let result = connection::run_command(app, port, command_builder::build_hf_mfu_info()).await;
+    let result = session.run_command(command_builder::build_hf_mfu_info()).await;
 
     match result {
         Ok(output) => {
@@ -397,11 +389,10 @@ async fn detect_magic_ultralight(
 
 /// Detect an iCLASS/Picopass blank via `hf iclass info`.
 async fn detect_iclass_blank(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    let result = connection::run_command(app, port, command_builder::build_hf_iclass_info()).await;
+    let result = session.run_command(command_builder::build_hf_iclass_info()).await;
 
     let detected = match &result {
         Ok(output) => output_parser::is_iclass_present(output),

@@ -1,5 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
+import { Badge } from '../shared/Badge';
+import { InlineNotice } from '../shared/InlineNotice';
 import { getSavedCards, deleteSavedCard, type SavedCard } from '../../lib/api';
 import { useWizard } from '../../hooks/useWizard';
 
@@ -31,14 +34,25 @@ function parseDecoded(json: string): Record<string, string> {
   return {};
 }
 
-const buttonStyle: React.CSSProperties = {
-  background: 'none',
-  border: '1px solid var(--green-dim)',
-  color: 'var(--green-dim)',
+const infoRowStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: 'var(--space-2) 0',
+  borderBottom: '1px solid var(--border-secondary)',
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: '13px',
+  color: 'var(--text-tertiary)',
+  fontFamily: 'var(--font-sans)',
+};
+
+const valueStyle: React.CSSProperties = {
+  fontSize: '13px',
+  color: 'var(--text-primary)',
   fontFamily: 'var(--font-mono)',
-  fontSize: '11px',
-  padding: '2px 8px',
-  cursor: 'pointer',
+  fontWeight: 500,
 };
 
 export function SavedView() {
@@ -104,222 +118,292 @@ export function SavedView() {
   // Loading state
   if (loading) {
     return (
-      <TerminalPanel title="SAVED CARDS">
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--green-dim)',
-          padding: '12px 0',
-        }}>
-          [..] Loading saved cards...
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Saved Cards
+          </h2>
         </div>
-      </TerminalPanel>
+        <Card>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+            padding: 'var(--space-4) 0',
+            justifyContent: 'center',
+          }}>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 16 16"
+              style={{ animation: 'spin 0.8s linear infinite', color: 'var(--accent)' }}
+            >
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+            </svg>
+            <span style={{
+              fontSize: '14px',
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-sans)',
+            }}>
+              Loading saved cards...
+            </span>
+          </div>
+        </Card>
+      </div>
     );
   }
 
   // Error state
   if (error) {
     return (
-      <TerminalPanel title="SAVED CARDS">
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--red-bright)',
-          padding: '12px 0',
-        }}>
-          [XX] Error: {error}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Saved Cards
+          </h2>
         </div>
-        <button
-          onClick={refresh}
-          style={buttonStyle}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--green-bright)'; e.currentTarget.style.borderColor = 'var(--green-bright)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--green-dim)'; e.currentTarget.style.borderColor = 'var(--green-dim)'; }}
-        >
-          RETRY
-        </button>
-      </TerminalPanel>
+        <InlineNotice variant="error">
+          {error}
+        </InlineNotice>
+        <div>
+          <Button variant="secondary" onClick={refresh}>
+            Retry
+          </Button>
+        </div>
+      </div>
     );
   }
 
   // Empty state
   if (cards.length === 0) {
     return (
-      <TerminalPanel title="SAVED CARDS">
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--green-dim)',
-          padding: '12px 0',
-        }}>
-          No saved cards.
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Saved Cards
+          </h2>
         </div>
-        <button
-          onClick={refresh}
-          style={buttonStyle}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--green-bright)'; e.currentTarget.style.borderColor = 'var(--green-bright)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--green-dim)'; e.currentTarget.style.borderColor = 'var(--green-dim)'; }}
-        >
-          REFRESH
-        </button>
-      </TerminalPanel>
+        <Card>
+          <div style={{
+            textAlign: 'center',
+            padding: 'var(--space-6) 0',
+          }}>
+            <p style={{
+              fontSize: '14px',
+              color: 'var(--text-tertiary)',
+              fontFamily: 'var(--font-sans)',
+              margin: '0 0 var(--space-4) 0',
+            }}>
+              No saved cards yet.
+            </p>
+            <Button variant="secondary" size="sm" onClick={refresh}>
+              Refresh
+            </Button>
+          </div>
+        </Card>
+      </div>
     );
   }
 
   const expanded = expandedId !== null ? cards.find(c => c.id === expandedId) : null;
 
   return (
-    <TerminalPanel title="SAVED CARDS">
-      {/* Table */}
-      <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-        }}
-      >
-        <thead>
-          <tr>
-            {['#', 'NAME', 'TYPE', 'DATE'].map(h => (
-              <th
-                key={h}
-                style={{
-                  padding: '4px 8px',
-                  textAlign: 'left',
-                  color: 'var(--green-mid)',
-                  borderBottom: '1px solid var(--green-dim)',
-                  fontWeight: 600,
-                  fontSize: '11px',
-                  letterSpacing: '1px',
-                }}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {cards.map((card, idx) => {
-            const isExpanded = card.id === expandedId;
-            return (
-              <tr
-                key={card.id ?? idx}
-                onClick={() => setExpandedId(isExpanded ? null : (card.id ?? null))}
-                style={{
-                  cursor: 'pointer',
-                  background: isExpanded ? 'rgba(0, 255, 65, 0.05)' : 'transparent',
-                }}
-                onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(0, 255, 65, 0.03)'; }}
-                onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <td style={{ padding: '3px 8px', color: isExpanded ? 'var(--green-bright)' : 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{card.id ?? idx + 1}</td>
-                <td style={{ padding: '3px 8px', color: isExpanded ? 'var(--green-bright)' : 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{card.name}</td>
-                <td style={{ padding: '3px 8px', color: isExpanded ? 'var(--green-bright)' : 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{card.cardType}</td>
-                <td style={{ padding: '3px 8px', color: isExpanded ? 'var(--green-bright)' : 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{formatLocalTime(card.createdAt)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {/* Expanded detail panel */}
-      {expanded && (
-        <div style={{
-          marginTop: '12px',
-          padding: '8px 12px',
-          border: '1px solid var(--green-dim)',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          lineHeight: '1.6',
-        }}>
-          <div style={{ color: 'var(--green-bright)', marginBottom: '6px' }}>
-            {`[::] ${expanded.name} -- detail`}
-          </div>
-          <div style={{ color: 'var(--green-mid)' }}>
-            {`  UID ......... ${expanded.uid}`}
-          </div>
-          <div style={{ color: 'var(--green-mid)' }}>
-            {`  FREQ ........ ${formatFrequency(expanded.frequency)}`}
-          </div>
-          <div style={{ color: 'var(--green-mid)' }}>
-            {`  BLANK ....... ${expanded.recommendedBlank}`}
-          </div>
-          <div style={{ color: 'var(--green-mid)' }}>
-            {`  CLONEABLE ... ${expanded.cloneable ? 'YES' : 'NO'}`}
-          </div>
-          {expanded.raw && (
-            <div style={{ color: 'var(--green-mid)' }}>
-              {`  RAW ......... ${expanded.raw}`}
-            </div>
-          )}
-          {/* Decoded fields */}
-          {(() => {
-            const decoded = parseDecoded(expanded.decoded);
-            const keys = Object.keys(decoded);
-            if (keys.length === 0) return null;
-            return (
-              <>
-                <div style={{ color: 'var(--green-dim)', marginTop: '4px' }}>
-                  {`  ${'─'.repeat(30)}`}
-                </div>
-                {keys.map(k => (
-                  <div key={k} style={{ color: 'var(--green-mid)' }}>
-                    {`  ${k.toUpperCase().padEnd(12)} ${decoded[k]}`}
-                  </div>
-                ))}
-              </>
-            );
-          })()}
-
-          {/* Action buttons */}
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleClone(expanded); }}
-              style={{
-                ...buttonStyle,
-                color: 'var(--green-bright)',
-                borderColor: 'var(--green-bright)',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 255, 65, 0.1)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
-            >
-              CLONE THIS
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); if (expanded.id !== null) handleDelete(expanded.id); }}
-              style={{
-                ...buttonStyle,
-                color: 'var(--red-bright)',
-                borderColor: 'var(--red-bright)',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 0, 0, 0.1)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
-            >
-              DELETE
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Footer with count and refresh */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      {/* Header */}
       <div style={{
-        marginTop: '12px',
-        fontSize: '11px',
-        color: 'var(--green-dim)',
         display: 'flex',
         alignItems: 'center',
-        gap: '12px',
+        justifyContent: 'space-between',
       }}>
-        <span>{cards.length} record{cards.length !== 1 ? 's' : ''}</span>
-        <button
-          onClick={refresh}
-          style={buttonStyle}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--green-bright)'; e.currentTarget.style.borderColor = 'var(--green-bright)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--green-dim)'; e.currentTarget.style.borderColor = 'var(--green-dim)'; }}
-        >
-          REFRESH
-        </button>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Saved Cards
+          </h2>
+          <p style={{
+            fontSize: '13px',
+            color: 'var(--text-tertiary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 'var(--space-1) 0 0 0',
+          }}>
+            {cards.length} card{cards.length !== 1 ? 's' : ''} saved
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={refresh}>
+          Refresh
+        </Button>
       </div>
-    </TerminalPanel>
+
+      {/* Card list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        {cards.map((card, idx) => {
+          const isExpanded = card.id === expandedId;
+
+          return (
+            <Card
+              key={card.id ?? idx}
+              style={{
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+                borderColor: isExpanded ? 'var(--accent)' : undefined,
+              }}
+            >
+              {/* Summary row */}
+              <div
+                onClick={() => setExpandedId(isExpanded ? null : (card.id ?? null))}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-3)',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {card.name}
+                  </div>
+                  <div style={{
+                    fontSize: '12px',
+                    color: 'var(--text-tertiary)',
+                    fontFamily: 'var(--font-sans)',
+                    marginTop: '2px',
+                  }}>
+                    {formatLocalTime(card.createdAt)}
+                  </div>
+                </div>
+                <Badge variant="neutral" label={card.cardType} dot={false} />
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  style={{
+                    color: 'var(--text-quaternary)',
+                    transition: 'transform var(--transition-fast)',
+                    transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+
+              {/* Expanded detail */}
+              {isExpanded && expanded && (
+                <div style={{
+                  marginTop: 'var(--space-3)',
+                  paddingTop: 'var(--space-3)',
+                  borderTop: '1px solid var(--border-secondary)',
+                }}>
+                  <div style={infoRowStyle}>
+                    <span style={labelStyle}>UID</span>
+                    <span style={valueStyle}>{expanded.uid}</span>
+                  </div>
+                  <div style={infoRowStyle}>
+                    <span style={labelStyle}>Frequency</span>
+                    <span style={valueStyle}>{formatFrequency(expanded.frequency)}</span>
+                  </div>
+                  <div style={infoRowStyle}>
+                    <span style={labelStyle}>Recommended Blank</span>
+                    <span style={valueStyle}>{expanded.recommendedBlank}</span>
+                  </div>
+                  <div style={infoRowStyle}>
+                    <span style={labelStyle}>Cloneable</span>
+                    <Badge
+                      variant={expanded.cloneable ? 'success' : 'error'}
+                      label={expanded.cloneable ? 'Yes' : 'No'}
+                    />
+                  </div>
+                  {expanded.raw && (
+                    <div style={infoRowStyle}>
+                      <span style={labelStyle}>Raw</span>
+                      <span style={{
+                        ...valueStyle,
+                        maxWidth: '200px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {expanded.raw}
+                      </span>
+                    </div>
+                  )}
+                  {/* Decoded fields */}
+                  {(() => {
+                    const decoded = parseDecoded(expanded.decoded);
+                    const keys = Object.keys(decoded);
+                    if (keys.length === 0) return null;
+                    return keys.map(k => (
+                      <div key={k} style={infoRowStyle}>
+                        <span style={labelStyle}>{k}</span>
+                        <span style={valueStyle}>{decoded[k]}</span>
+                      </div>
+                    ));
+                  })()}
+
+                  {/* Action buttons */}
+                  <div style={{
+                    marginTop: 'var(--space-3)',
+                    display: 'flex',
+                    gap: 'var(--space-2)',
+                  }}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleClone(expanded)}
+                    >
+                      Clone This
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => { if (expanded.id !== null) handleDelete(expanded.id); }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }

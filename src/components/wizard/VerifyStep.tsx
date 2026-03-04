@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
-import { useSfx } from '../../hooks/useSfx';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
+import { InlineNotice } from '../shared/InlineNotice';
 
 interface VerifyStepProps {
   onContinue: () => void;
@@ -11,127 +11,135 @@ interface VerifyStepProps {
   mismatchedBlocks?: number[];
 }
 
-const SPINNER_FRAMES = ['|', '/', '-', '\\'];
-
 export function VerifyStep({ onContinue, onRetryWrite, onReset, isLoading, success, mismatchedBlocks }: VerifyStepProps) {
-  const sfx = useSfx();
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
-
-  // Spinner animation while verifying
-  useEffect(() => {
-    if (!isLoading) return;
-    const timer = setInterval(() => {
-      setSpinnerIdx(prev => (prev + 1) % SPINNER_FRAMES.length);
-    }, 100);
-    return () => clearInterval(timer);
-  }, [isLoading]);
-
-  const buttonStyle: React.CSSProperties = {
-    background: 'var(--bg-void)',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '13px',
-    fontWeight: 600,
-    padding: '6px 20px',
-    cursor: 'pointer',
-  };
-
-  return (
-    <TerminalPanel title="VERIFY">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-        {isLoading ? (
+  // Verifying in progress
+  if (isLoading) {
+    return (
+      <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'var(--bg-tertiary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '24px',
+          }}>
+            <span style={{ animation: 'spin 1.5s linear infinite' }}>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              &#x21BB;
+            </span>
+          </div>
           <div>
-            <div style={{ color: 'var(--amber)' }}>
-              [{SPINNER_FRAMES[spinnerIdx]}] Verifying clone...
+            <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'var(--space-1)' }}>
+              Verifying Clone...
             </div>
-            <div style={{ color: 'var(--green-dim)', marginTop: '4px' }}>
-              Reading back cloned card data and comparing...
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+              Reading back cloned card data and comparing.
             </div>
           </div>
-        ) : (
+        </div>
+      </Card>
+    );
+  }
+
+  // Verification complete - success
+  if (success === true) {
+    return (
+      <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'var(--success)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '28px',
+            color: '#FFFFFF',
+          }}>
+            &#x2713;
+          </div>
           <div>
-            {success === true ? (
-              <>
-                <div style={{ color: 'var(--green-bright)', fontSize: '16px', fontWeight: 700 }}>
-                  [OK] CLONE SUCCESSFUL
-                </div>
-                <button
-                  onClick={() => { sfx.action(); onContinue(); }}
-                  style={{
-                    ...buttonStyle,
-                    marginTop: '16px',
-                    color: 'var(--green-bright)',
-                    border: '2px solid var(--green-bright)',
-                  }}
-                  onMouseEnter={(e) => {
-                    sfx.hover();
-                    e.currentTarget.style.background = 'var(--green-ghost)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'var(--bg-void)';
-                  }}
-                >
-                  {'-->'} CONTINUE
-                </button>
-              </>
-            ) : success === false ? (
-              <>
-                <div style={{ color: 'var(--red-bright)', fontSize: '16px', fontWeight: 700 }}>
-                  [!!] VERIFICATION FAILED
-                </div>
-                {mismatchedBlocks && mismatchedBlocks.length > 0 && (
-                  <div style={{ color: 'var(--red-bright)', marginTop: '8px', fontSize: '12px' }}>
-                    Mismatched blocks: {mismatchedBlocks.join(', ')}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-                  {onRetryWrite && (
-                    <button
-                      onClick={() => { sfx.action(); onRetryWrite(); }}
-                      style={{
-                        ...buttonStyle,
-                        color: 'var(--amber)',
-                        border: '2px solid var(--amber)',
-                      }}
-                      onMouseEnter={(e) => {
-                        sfx.hover();
-                        e.currentTarget.style.background = 'rgba(255, 184, 0, 0.08)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'var(--bg-void)';
-                      }}
-                    >
-                      RETRY WRITE
-                    </button>
-                  )}
-                  {onReset && (
-                    <button
-                      onClick={() => { sfx.action(); onReset(); }}
-                      style={{
-                        ...buttonStyle,
-                        color: 'var(--green-bright)',
-                        border: '2px solid var(--green-bright)',
-                      }}
-                      onMouseEnter={(e) => {
-                        sfx.hover();
-                        e.currentTarget.style.background = 'var(--green-ghost)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'var(--bg-void)';
-                      }}
-                    >
-                      RESET
-                    </button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div style={{ color: 'var(--green-dim)' }}>
-                [~] Waiting for verification result...
-              </div>
+            <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'var(--space-1)' }}>
+              Clone Successful
+            </div>
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+              The card data has been verified successfully.
+            </div>
+          </div>
+          <Button variant="primary" size="md" onClick={onContinue}>
+            Continue
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  // Verification complete - failure
+  if (success === false) {
+    return (
+      <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'var(--error)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '28px',
+            color: '#FFFFFF',
+            fontWeight: 700,
+          }}>
+            &#x2717;
+          </div>
+          <div>
+            <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'var(--space-1)' }}>
+              Verification Failed
+            </div>
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+              The cloned data did not match the source.
+            </div>
+          </div>
+
+          {mismatchedBlocks && mismatchedBlocks.length > 0 && (
+            <InlineNotice variant="error" style={{ textAlign: 'left', width: '100%' }}>
+              Mismatched blocks: {mismatchedBlocks.join(', ')}
+            </InlineNotice>
+          )}
+
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            {onRetryWrite && (
+              <Button variant="secondary" size="sm" onClick={onRetryWrite}>
+                Retry Write
+              </Button>
+            )}
+            {onReset && (
+              <Button variant="ghost" size="sm" onClick={onReset}>
+                Reset
+              </Button>
             )}
           </div>
-        )}
+        </div>
+      </Card>
+    );
+  }
+
+  // Waiting state (null success)
+  return (
+    <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+      <div style={{
+        fontSize: '14px',
+        color: 'var(--text-secondary)',
+        padding: 'var(--space-4) 0',
+      }}>
+        Waiting for verification result...
       </div>
-    </TerminalPanel>
+    </Card>
   );
 }

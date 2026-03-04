@@ -3,7 +3,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::cards::types::{BlankType, CardType, RecoveryAction};
 use crate::error::AppError;
-use crate::pm3::{command_builder, connection, output_parser};
+use crate::pm3::{command_builder, output_parser};
+use crate::pm3::session::Pm3Session;
 use crate::state::{WizardAction, WizardMachine, WizardState};
 
 /// Total progress steps for the T5577 write flow:
@@ -30,15 +31,16 @@ pub async fn write_clone(
 /// This is the preferred entry point. Handles T5577 password safety and EM4305 blanks.
 #[tauri::command]
 pub async fn write_clone_with_data(
-    app: AppHandle,
-    port: String,
+    _app: AppHandle,
+    _port: String,
     card_type: CardType,
     uid: String,
     decoded: std::collections::HashMap<String, String>,
     blank_type: Option<BlankType>,
     machine: State<'_, Mutex<WizardMachine>>,
+    session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
-    log::debug!("write_clone_with_data: port={}, card_type={:?}, uid={}, blank_type={:?}", port, card_type, uid, blank_type);
+    log::debug!("write_clone_with_data: card_type={:?}, uid={}, blank_type={:?}", card_type, uid, blank_type);
 
     // Guard: reject absurdly large decoded maps (prevents DoS via oversized IPC payload)
     if decoded.len() > 50 {
@@ -57,16 +59,6 @@ pub async fn write_clone_with_data(
     }
     if uid.len() > 200 {
         return Err(AppError::CommandFailed("UID too long".into()));
-    }
-
-    // Validate port format
-    if port.is_empty()
-        || port.len() > 50
-        || port.contains(';')
-        || port.contains('\n')
-        || port.contains('\r')
-    {
-        return Err(AppError::CommandFailed("Invalid port".into()));
     }
 
     let blank = blank_type.unwrap_or_else(|| card_type.recommended_blank());
@@ -95,7 +87,7 @@ pub async fn write_clone_with_data(
     // to keep the backend FSM in sync with the frontend XState machine.
     match blank {
         BlankType::T5577 => {
-            match write_t5577_flow(&app, &port, &card_type, &uid, &decoded, &machine).await {
+            match write_t5577_flow(&session, &card_type, &uid, &decoded, &machine).await {
                 Ok(state) => Ok(state),
                 Err(e) => {
                     let err_detail = e.to_string();
@@ -120,7 +112,7 @@ pub async fn write_clone_with_data(
             }
         }
         BlankType::EM4305 => {
-            match write_em4305_flow(&app, &port, &card_type, &uid, &decoded, &machine).await {
+            match write_em4305_flow(&session, &card_type, &uid, &decoded, &machine).await {
                 Ok(state) => Ok(state),
                 Err(e) => {
                     let err_detail = e.to_string();
@@ -162,19 +154,20 @@ pub async fn write_clone_with_data(
 /// - No password: detect -> clone (clone overwrites config + data blocks directly)
 /// - Password: detect -> find password -> wipe -> verify wipe -> clone
 async fn write_t5577_flow(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     card_type: &CardType,
     uid: &str,
     decoded: &std::collections::HashMap<String, String>,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
+    let app = session.app();
+
     // Step 1: Detect T5577
     log::debug!("T5577 flow: Step 1 detect");
     update_progress(app, machine, 0.1, Some(0), Some(T5577_TOTAL_STEPS))?;
 
     let detect_out =
-        connection::run_command(app, port, command_builder::build_t5577_detect()).await?;
+        session.run_command(command_builder::build_t5577_detect()).await?;
     let t5577_status = output_parser::parse_t5577_detect(&detect_out);
     log::debug!("T5577 detect: detected={}, pw={}", t5577_status.detected, t5577_status.password_set);
 
@@ -193,7 +186,7 @@ async fn write_t5577_flow(
 
     let password: Option<String> = if t5577_status.password_set {
         // Password detected -- run chk to find it
-        let chk_out = connection::run_command(app, port, command_builder::build_t5577_chk()).await;
+        let chk_out = session.run_command(command_builder::build_t5577_chk()).await;
         match chk_out {
             Ok(output) => {
                 let found = output_parser::parse_t5577_chk(&output);
@@ -236,14 +229,14 @@ async fn write_t5577_flow(
                 .ok_or_else(|| {
                     AppError::CommandFailed("No wipe command for this blank type".into())
                 })?;
-        connection::run_command(app, port, &wipe_cmd).await?;
+        session.run_command(&wipe_cmd).await?;
 
         // Verify wipe — ensure T5577 is detected and no longer password-protected.
         // PM3 can return exit code 0 even when a password-protected wipe fails silently.
         update_progress(app, machine, 0.5, Some(3), Some(T5577_TOTAL_STEPS))?;
 
         let verify_wipe_out =
-            connection::run_command(app, port, command_builder::build_t5577_detect()).await?;
+            session.run_command(command_builder::build_t5577_detect()).await?;
         let verify_status = output_parser::parse_t5577_detect(&verify_wipe_out);
 
         if !verify_status.detected || verify_status.password_set {
@@ -279,7 +272,7 @@ async fn write_t5577_flow(
                 None => cmd,
             };
             log::debug!("sending={}", final_cmd);
-            let clone_output = connection::run_command(app, port, &final_cmd).await;
+            let clone_output = session.run_command(&final_cmd).await;
             log::debug!("clone_result={:?}", clone_output.as_ref().map(|s| s.chars().take(500).collect::<String>()).map_err(|e| e.to_string()));
             let clone_output = clone_output?;
             // Check for failure indicators in PM3 output
@@ -326,19 +319,20 @@ async fn write_t5577_flow(
 /// EM4305 write flow with detect + wipe-verify safety checks:
 /// 1. detect EM4305 -> 2. wipe -> 3. verify wipe -> 4. clone with --em -> 5. done
 async fn write_em4305_flow(
-    app: &AppHandle,
-    port: &str,
+    session: &Pm3Session,
     card_type: &CardType,
     uid: &str,
     decoded: &std::collections::HashMap<String, String>,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
+    let app = session.app();
+
     // Step 1: Detect EM4305 — verify the blank chip is present before wiping.
     // Mirrors the T5577 detect step to prevent wiping air / wrong chip.
     update_progress(app, machine, 0.1, Some(0), Some(EM4305_TOTAL_STEPS))?;
 
     let info_out =
-        connection::run_command(app, port, command_builder::build_em4305_info()).await?;
+        session.run_command(command_builder::build_em4305_info()).await?;
 
     if !output_parser::parse_em4305_info(&info_out) {
         return report_error(
@@ -353,7 +347,7 @@ async fn write_em4305_flow(
     // Step 2: Wipe EM4305
     update_progress(app, machine, 0.3, Some(1), Some(EM4305_TOTAL_STEPS))?;
 
-    connection::run_command(app, port, command_builder::build_em4305_wipe()).await?;
+    session.run_command(command_builder::build_em4305_wipe()).await?;
 
     // Step 3: Verify wipe — read word 0 and check it's zeroed.
     // PM3 can return exit code 0 even when wipe fails silently.
@@ -361,7 +355,7 @@ async fn write_em4305_flow(
     update_progress(app, machine, 0.5, Some(2), Some(EM4305_TOTAL_STEPS))?;
 
     let verify_out =
-        connection::run_command(app, port, &command_builder::build_em4305_read_word(0)).await?;
+        session.run_command(&command_builder::build_em4305_read_word(0)).await?;
     if let Some(word0) = output_parser::parse_em4305_word0(&verify_out) {
         if word0 != "00000000" {
             return report_error(
@@ -387,7 +381,7 @@ async fn write_em4305_flow(
     match base_clone_cmd {
         Some(cmd) => {
             let em_cmd = command_builder::build_clone_for_em4305(&cmd);
-            let clone_output = connection::run_command(app, port, &em_cmd).await?;
+            let clone_output = session.run_command(&em_cmd).await?;
             // Check for failure indicators in PM3 output
             if clone_output.contains("[!!]")
                 || clone_output.to_lowercase().contains("fail")
@@ -436,13 +430,14 @@ async fn write_em4305_flow(
 /// type determines the verification command. Currently unused for LF cards.
 #[tauri::command]
 pub async fn verify_clone(
-    app: AppHandle,
-    port: String,
+    _app: AppHandle,
+    _port: String,
     source_uid: String,
     source_card_type: CardType,
     source_decoded: Option<std::collections::HashMap<String, String>>,
     _blank_type: Option<BlankType>,
     machine: State<'_, Mutex<WizardMachine>>,
+    session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
     // Guard: must be in Verifying state before running any hardware commands.
     // Without this check, a call from the wrong state would waste a PM3
@@ -465,7 +460,7 @@ pub async fn verify_clone(
     // Use generic `lf search` for verification — parse_lf_search is designed to parse
     // its output format. Type-specific readers (lf hid reader, etc.) produce different
     // output that parse_lf_search can't handle, causing false verification failures.
-    let verify_output = connection::run_command(&app, &port, "lf search").await?;
+    let verify_output = session.run_command("lf search").await?;
 
     // Use detailed verification if decoded fields are available
     let (success, mismatched) = if let Some(ref decoded) = source_decoded {

@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
+import { Badge } from '../shared/Badge';
+import { InlineNotice } from '../shared/InlineNotice';
 import { getHistory } from '../../lib/api';
 import type { CloneRecord } from '../../machines/types';
 
@@ -30,6 +33,19 @@ function toHistoryRecord(r: CloneRecord, index: number): HistoryRecord {
     status: r.success ? 'ok' as const : 'fail' as const,
   };
 }
+
+const rowLabelStyle: React.CSSProperties = {
+  fontSize: '12px',
+  color: 'var(--text-tertiary)',
+  fontFamily: 'var(--font-sans)',
+};
+
+const rowValueStyle: React.CSSProperties = {
+  fontSize: '13px',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-mono)',
+  fontWeight: 500,
+};
 
 export function HistoryView() {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
@@ -68,133 +84,212 @@ export function HistoryView() {
   // Loading state
   if (loading) {
     return (
-      <TerminalPanel title="CLONE HISTORY">
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--green-dim)',
-          padding: '12px 0',
-        }}>
-          [..] Loading history...
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Clone History
+          </h2>
         </div>
-      </TerminalPanel>
+        <Card>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+            padding: 'var(--space-4) 0',
+            justifyContent: 'center',
+          }}>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 16 16"
+              style={{ animation: 'spin 0.8s linear infinite', color: 'var(--accent)' }}
+            >
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+            </svg>
+            <span style={{
+              fontSize: '14px',
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-sans)',
+            }}>
+              Loading history...
+            </span>
+          </div>
+        </Card>
+      </div>
     );
   }
 
   // Error state
   if (error) {
     return (
-      <TerminalPanel title="CLONE HISTORY">
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--red-bright)',
-          padding: '12px 0',
-        }}>
-          [XX] Error loading history: {error}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Clone History
+          </h2>
         </div>
-        <button
-          onClick={handleRefresh}
-          style={{
-            background: 'none',
-            border: '1px solid var(--green-dim)',
-            color: 'var(--green-dim)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
-            padding: '2px 8px',
-            cursor: 'pointer',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--green-bright)'; e.currentTarget.style.borderColor = 'var(--green-bright)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--green-dim)'; e.currentTarget.style.borderColor = 'var(--green-dim)'; }}
-        >
-          RETRY
-        </button>
-      </TerminalPanel>
+        <InlineNotice variant="error">
+          {error}
+        </InlineNotice>
+        <div>
+          <Button variant="secondary" onClick={handleRefresh}>
+            Retry
+          </Button>
+        </div>
+      </div>
     );
   }
 
   // Empty state
   if (records.length === 0) {
     return (
-      <TerminalPanel title="CLONE HISTORY">
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--green-dim)',
-          padding: '12px 0',
-        }}>
-          No clone history yet.
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Clone History
+          </h2>
         </div>
-      </TerminalPanel>
+        <Card>
+          <div style={{
+            textAlign: 'center',
+            padding: 'var(--space-6) 0',
+          }}>
+            <p style={{
+              fontSize: '14px',
+              color: 'var(--text-tertiary)',
+              fontFamily: 'var(--font-sans)',
+              margin: 0,
+            }}>
+              No clone history yet.
+            </p>
+          </div>
+        </Card>
+      </div>
     );
   }
 
   const successCount = records.filter(r => r.status === 'ok').length;
 
   return (
-    <TerminalPanel title="CLONE HISTORY">
-      <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-        }}
-      >
-        <thead>
-          <tr>
-            {['#', 'SOURCE', 'TARGET', 'UID', 'DATE', 'STATUS'].map(h => (
-              <th
-                key={h}
-                style={{
-                  padding: '4px 8px',
-                  textAlign: 'left',
-                  color: 'var(--green-mid)',
-                  borderBottom: '1px solid var(--green-dim)',
-                  fontWeight: 600,
-                  fontSize: '11px',
-                  letterSpacing: '1px',
-                }}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {records.map(rec => (
-            <tr key={rec.id}>
-              <td style={{ padding: '3px 8px', color: 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{rec.id}</td>
-              <td style={{ padding: '3px 8px', color: 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{rec.source}</td>
-              <td style={{ padding: '3px 8px', color: 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{rec.target}</td>
-              <td style={{ padding: '3px 8px', color: 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{rec.uid}</td>
-              <td style={{ padding: '3px 8px', color: 'var(--green-mid)', borderBottom: '1px solid rgba(0,255,65,0.1)' }}>{rec.date}</td>
-              <td style={{ padding: '3px 8px', borderBottom: '1px solid rgba(0,255,65,0.1)', color: rec.status === 'ok' ? 'var(--green-bright)' : 'var(--red-bright)' }}>
-                {rec.status === 'ok' ? '[OK]' : '[!!]'}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--green-dim)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <span>{records.length} records | {successCount} successful</span>
-        <button
-          onClick={handleRefresh}
-          style={{
-            background: 'none',
-            border: '1px solid var(--green-dim)',
-            color: 'var(--green-dim)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
-            padding: '2px 8px',
-            cursor: 'pointer',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--green-bright)'; e.currentTarget.style.borderColor = 'var(--green-bright)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--green-dim)'; e.currentTarget.style.borderColor = 'var(--green-dim)'; }}
-        >
-          REFRESH
-        </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <div>
+          <h2 style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 0,
+            letterSpacing: '-0.02em',
+          }}>
+            Clone History
+          </h2>
+          <p style={{
+            fontSize: '13px',
+            color: 'var(--text-tertiary)',
+            fontFamily: 'var(--font-sans)',
+            margin: 'var(--space-1) 0 0 0',
+          }}>
+            {records.length} record{records.length !== 1 ? 's' : ''} &middot; {successCount} successful
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={handleRefresh}>
+          Refresh
+        </Button>
       </div>
-    </TerminalPanel>
+
+      {/* Record list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        {records.map(rec => (
+          <Card key={rec.id}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 'var(--space-3)',
+            }}>
+              {/* Left side: info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Source -> Target */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  marginBottom: 'var(--space-2)',
+                }}>
+                  <span style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                  }}>
+                    {rec.source}
+                  </span>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--text-quaternary)', flexShrink: 0 }}>
+                    <path d="M3 8H13M13 8L9 4M13 8L9 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                  }}>
+                    {rec.target}
+                  </span>
+                </div>
+                {/* UID + Date */}
+                <div style={{
+                  display: 'flex',
+                  gap: 'var(--space-4)',
+                  flexWrap: 'wrap',
+                }}>
+                  <div>
+                    <span style={rowLabelStyle}>UID </span>
+                    <span style={rowValueStyle}>{rec.uid}</span>
+                  </div>
+                  <div>
+                    <span style={rowLabelStyle}>Date </span>
+                    <span style={{ ...rowValueStyle, fontFamily: 'var(--font-sans)', fontWeight: 400 }}>{rec.date}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right side: status badge */}
+              <Badge
+                variant={rec.status === 'ok' ? 'success' : 'error'}
+                label={rec.status === 'ok' ? 'Success' : 'Failed'}
+              />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }

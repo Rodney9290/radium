@@ -124,12 +124,19 @@ pub fn compare_versions(client_ver: &str, os_ver: &str) -> bool {
 /// Detect hardware variant from `hw version` output.
 ///
 /// - `AT91SAM7S256` in uC line → `"generic-256"`
+/// - `iCopy` or `PM3ICOPYX` in output → `"icopyx"` (PM3 Max)
 /// - `External flash: present` AND `Smartcard reader: present` AND `FPC USART` for BT → `"rdv4-bt"`
 /// - `External flash: present` AND `Smartcard reader: present` → `"rdv4"`
 /// - Otherwise → `"generic"`
 pub fn detect_hardware_variant(output: &str) -> String {
     if UC_256K_RE.is_match(output) {
         return "generic-256".to_string();
+    }
+
+    // Detect iCopy-X / PM3 Max platform
+    let lower = output.to_lowercase();
+    if lower.contains("icopy") || lower.contains("pm3icopyx") {
+        return "icopyx".to_string();
     }
 
     let has_ext_flash = output

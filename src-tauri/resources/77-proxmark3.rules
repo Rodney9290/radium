@@ -1,0 +1,21 @@
+# Proxmark3 udev rules for Linux
+# Install to /etc/udev/rules.d/77-proxmark3.rules
+# Then: sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# Proxmark3 CDC ACM (official firmware)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="9ac4", ATTRS{idProduct}=="4b8f", MODE="0666", GROUP="dialout", SYMLINK+="pm3_%n"
+
+# CH340 USB-to-serial (common PM3 Easy clones)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666", GROUP="dialout"
+
+# CP2102 USB-to-serial (some PM3 Easy variants)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0666", GROUP="dialout"
+
+# FTDI FT232 (some PM3 RDV4 variants)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0666", GROUP="dialout"
+
+# Proxmark3 DFU mode (firmware flashing)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="9ac4", ATTRS{idProduct}=="4b8f", MODE="0666", GROUP="plugdev"
+
+# Generic CDC ACM access for dialout group
+KERNEL=="ttyACM[0-9]*", MODE="0666", GROUP="dialout"

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Phosphor",
-  "version": "1.1.0",
-  "identifier": "com.phosphor.app",
+  "productName": "Radium",
+  "version": "1.2.0",
+  "identifier": "com.radium.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Phosphor",
+        "title": "Radium",
         "width": 1200,
         "height": 800,
         "minWidth": 900,
@@ -22,19 +22,20 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' asset: https://asset.localhost"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' asset: https://asset.localhost"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": "all",
     "externalBin": ["binaries/proxmark3"],
     "resources": {
       "pm3-libs/*": "./",
       "pm3-libs/platforms/*": "./platforms/",
       "firmware/rdv4/*": "./firmware/rdv4/",
       "firmware/rdv4-bt/*": "./firmware/rdv4-bt/",
-      "firmware/generic/*": "./firmware/generic/"
+      "firmware/generic/*": "./firmware/generic/",
+      "resources/77-proxmark3.rules": "./"
     },
     "icon": [
       "icons/32x32.png",
@@ -43,7 +44,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright 2025-2026 nik shuv",
+    "copyright": "Copyright 2025-2026",
     "shortDescription": "Proxmark3 GUI for one-click card cloning",
     "windows": {
       "nsis": {
@@ -51,6 +52,14 @@
         "displayLanguageSelector": true,
         "languages": ["English", "Russian"],
         "installerIcon": "icons/icon.ico"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libc6", "libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
       }
     }
   }

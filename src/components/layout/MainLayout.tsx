@@ -1,68 +1,69 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TopBar } from './TopBar';
-import { Sidebar, type TabId } from './Sidebar';
-import { StatusBar, type SystemStatus } from './StatusBar';
 import { WizardContainer } from '../wizard/WizardContainer';
 import { EraseView } from '../erase/EraseView';
 import { HistoryView } from '../history/HistoryView';
 import { SavedView } from '../saved/SavedView';
 import { SettingsView } from '../settings/SettingsView';
-import { useMusic } from '../../hooks/useMusic';
 import { useWizard } from '../../hooks/useWizard';
-import { LiveTerminal } from '../shared/LiveTerminal';
+import { DetailsDrawer } from '../shared/DetailsDrawer';
+import { SegmentedControl } from '../shared/SegmentedControl';
+import { getDeviceCapabilities } from '../../lib/api';
+import { useMusic } from '../../hooks/useMusic';
+import type { DeviceCapabilities } from '../../machines/types';
+
+export type TabId = 'clone' | 'erase' | 'saved' | 'history' | 'settings';
+
+const TAB_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Clone', value: 'clone' },
+  { label: 'Erase', value: 'erase' },
+  { label: 'Saved', value: 'saved' },
+  { label: 'History', value: 'history' },
+  { label: 'Settings', value: 'settings' },
+];
 
 export function MainLayout() {
-  const [activeTab, setActiveTab] = useState<TabId>('scan');
-  const { enabled: musicEnabled, toggle: toggleMusic } = useMusic();
+  const [activeTab, setActiveTab] = useState<TabId>('clone');
+  const [capabilities, setCapabilities] = useState<DeviceCapabilities | null>(null);
   const wizard = useWizard();
+  useMusic(); // Background music (controlled by settings)
 
-  // B1: Derive PM3 connection status from wizard step
   const connected = wizard.currentStep !== 'Idle' && wizard.currentStep !== 'DetectingDevice';
 
-  // B8: Derive system status from wizard state
-  const status: SystemStatus = wizard.isLoading ? 'busy'
-    : wizard.currentStep === 'Error' ? 'error'
-    : 'ready';
-
-  const statusMessage = (() => {
-    switch (wizard.currentStep) {
-      case 'DetectingDevice': return 'Detecting PM3...';
-      case 'ScanningCard': return 'Scanning card...';
-      case 'WaitingForBlank': return 'Waiting for blank...';
-      case 'Writing': return 'Writing clone...';
-      case 'Verifying': return 'Verifying...';
-      case 'Error': return wizard.context.errorUserMessage || 'ERROR';
-      case 'Complete': return 'Clone complete!';
-      default: return undefined;
+  // Fetch device capabilities when connected
+  useEffect(() => {
+    if (connected) {
+      getDeviceCapabilities().then(setCapabilities).catch(() => {});
+    } else {
+      setCapabilities(null);
     }
-  })();
+  }, [connected]);
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'scan':
-      case 'write':
+      case 'clone':
         return <WizardContainer />;
       case 'erase':
         return (
-          <div style={{ padding: '24px', position: 'relative', zIndex: 5, display: 'flex', justifyContent: 'center' }}>
+          <div style={{ padding: 'var(--space-6)', display: 'flex', justifyContent: 'center' }}>
             <EraseView port={wizard.context.port ?? undefined} />
           </div>
         );
       case 'history':
         return (
-          <div style={{ padding: '24px', position: 'relative', zIndex: 5 }}>
+          <div style={{ padding: 'var(--space-6)' }}>
             <HistoryView />
           </div>
         );
       case 'saved':
         return (
-          <div style={{ padding: '24px', position: 'relative', zIndex: 5 }}>
+          <div style={{ padding: 'var(--space-6)' }}>
             <SavedView />
           </div>
         );
       case 'settings':
         return (
-          <div style={{ padding: '24px', position: 'relative', zIndex: 5 }}>
+          <div style={{ padding: 'var(--space-6)' }}>
             <SettingsView />
           </div>
         );
@@ -73,49 +74,44 @@ export function MainLayout() {
     <div
       style={{
         display: 'grid',
-        gridTemplateRows: '32px 1fr auto 24px',
-        gridTemplateColumns: '180px 1fr',
+        gridTemplateRows: '48px 44px 1fr auto',
         width: '100%',
         height: '100%',
-        position: 'relative',
-        zIndex: 1,
       }}
     >
-      {/* TopBar spans full width */}
-      <div style={{ gridColumn: '1 / -1' }}>
-        <TopBar connected={connected} onDisconnect={wizard.disconnect} />
+      {/* Header */}
+      <TopBar connected={connected} capabilities={capabilities} onDisconnect={wizard.disconnect} />
+
+      {/* Tab Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 var(--space-4)',
+          background: 'var(--bg-primary)',
+          borderBottom: '1px solid var(--border-secondary)',
+        }}
+      >
+        <SegmentedControl
+          options={TAB_OPTIONS}
+          value={activeTab}
+          onChange={(v) => setActiveTab(v as TabId)}
+        />
       </div>
 
-      {/* Sidebar */}
-      {/* B2: Pull device info from wizard context */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        deviceName={wizard.context.model || '---'}
-        devicePort={wizard.context.port || '---'}
-        firmware={wizard.context.firmware || '---'}
-      />
-
-      {/* Main content area */}
+      {/* Main content */}
       <div
         style={{
           overflow: 'auto',
-          position: 'relative',
+          background: 'var(--bg-secondary)',
         }}
       >
         {renderContent()}
       </div>
 
-      {/* LiveTerminal spans full width */}
-      <div style={{ gridColumn: '1 / -1' }}>
-        <LiveTerminal />
-      </div>
-
-      {/* StatusBar spans full width */}
-      <div style={{ gridColumn: '1 / -1' }}>
-        <StatusBar status={status} message={statusMessage} musicEnabled={musicEnabled} onMusicToggle={toggleMusic} />
-      </div>
-
+      {/* Details drawer (collapsible log) */}
+      <DetailsDrawer />
     </div>
   );
 }

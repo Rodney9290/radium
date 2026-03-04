@@ -1,5 +1,6 @@
-import { TerminalPanel } from '../shared/TerminalPanel';
-import { useSfx } from '../../hooks/useSfx';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
+import { InlineNotice } from '../shared/InlineNotice';
 import type { BlankType } from '../../machines/types';
 
 interface HfDumpReadyStepProps {
@@ -19,95 +20,82 @@ export function HfDumpReadyStep({
   onBack,
   recommendedBlank,
 }: HfDumpReadyStepProps) {
-  const sfx = useSfx();
-
-  const btnBase: React.CSSProperties = {
-    background: 'var(--bg-void)',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '13px',
-    fontWeight: 600,
-    padding: '6px 20px',
-    cursor: 'pointer',
-  };
-
   return (
-    <TerminalPanel title="DUMP READY">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-        <div style={{ color: 'var(--green-bright)' }}>
-          [+] KEY RECOVERY COMPLETE
-        </div>
-
-        {keysTotal > 0 && (
-          <div style={{ color: 'var(--green-dim)', marginTop: '4px' }}>
-            KEYS   : {keysFound}/{keysTotal}
+    <Card title="Dump Ready" style={{ maxWidth: '440px', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        {/* Success header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{
+            width: '28px',
+            height: '28px',
+            borderRadius: '50%',
+            background: 'var(--success)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '16px',
+            color: '#FFFFFF',
+            flexShrink: 0,
+          }}>
+            &#x2713;
           </div>
-        )}
-
-        {dumpInfo && (
-          <div style={{ color: 'var(--green-dim)' }}>
-            DUMP   : {dumpInfo}
+          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Key Recovery Complete
           </div>
-        )}
-
-        <div style={{ color: 'var(--green-bright)', marginTop: '8px' }}>
-          [+] Dump saved successfully
         </div>
 
-        <div style={{ color: 'var(--amber)', marginTop: '16px', fontWeight: 600 }}>
-          [!] SWAP CARDS
-        </div>
-        <div style={{ color: 'var(--green-dim)', marginTop: '4px' }}>
-          1. Remove the source card from the reader
-        </div>
-        <div style={{ color: 'var(--green-dim)' }}>
-          2. Place the blank magic card you want to write to
+        {/* Summary info */}
+        <div style={{
+          background: 'var(--bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          padding: 'var(--space-3) var(--space-4)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+        }}>
+          {keysTotal > 0 && (
+            <SummaryRow label="Keys" value={`${keysFound} / ${keysTotal}`} />
+          )}
+          {dumpInfo && (
+            <SummaryRow label="Dump" value={dumpInfo} />
+          )}
+          <SummaryRow label="Status" value="Saved successfully" />
         </div>
 
-        <div style={{ marginTop: '16px', display: 'flex', gap: '12px' }}>
-          <button
-            onClick={() => {
-              sfx.action();
-              if (recommendedBlank) onWriteToBlank(recommendedBlank);
-            }}
-            style={{
-              ...btnBase,
-              color: 'var(--green-bright)',
-              border: '2px solid var(--green-bright)',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.background = 'var(--green-ghost)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-            }}
+        {/* Swap cards instruction */}
+        <InlineNotice variant="warning">
+          <div style={{ fontWeight: 500, marginBottom: 'var(--space-1)' }}>Swap Cards</div>
+          <div>1. Remove the source card from the reader</div>
+          <div>2. Place the blank magic card you want to write to</div>
+        </InlineNotice>
+
+        {/* Actions */}
+        <div style={{
+          display: 'flex',
+          gap: 'var(--space-2)',
+          paddingTop: 'var(--space-1)',
+        }}>
+          <Button variant="secondary" size="sm" onClick={onBack}>
+            Back
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => { if (recommendedBlank) onWriteToBlank(recommendedBlank); }}
           >
-            {'-->'} WRITE TO BLANK
-          </button>
-
-          <button
-            onClick={() => { sfx.action(); onBack(); }}
-            style={{
-              ...btnBase,
-              color: 'var(--green-dim)',
-              border: '2px solid var(--green-dim)',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.background = 'var(--green-ghost)';
-              e.currentTarget.style.color = 'var(--green-bright)';
-              e.currentTarget.style.borderColor = 'var(--green-bright)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-              e.currentTarget.style.color = 'var(--green-dim)';
-              e.currentTarget.style.borderColor = 'var(--green-dim)';
-            }}
-          >
-            {'<--'} BACK
-          </button>
+            Write to Blank
+          </Button>
         </div>
       </div>
-    </TerminalPanel>
+    </Card>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+      <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
+      <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{value}</span>
+    </div>
   );
 }

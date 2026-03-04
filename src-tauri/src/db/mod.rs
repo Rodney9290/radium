@@ -16,7 +16,7 @@ impl Database {
             AppError::DatabaseError(format!("Cannot create data dir: {}", e))
         })?;
 
-        let db_path = app_data_dir.join("phosphor.db");
+        let db_path = app_data_dir.join("radium.db");
         let conn = Connection::open(&db_path)?;
 
         conn.execute_batch(

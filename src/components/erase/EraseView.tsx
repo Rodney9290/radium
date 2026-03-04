@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
-import { useSfx } from '../../hooks/useSfx';
+import { useState, useCallback } from 'react';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
+import { Badge } from '../shared/Badge';
+import { InlineNotice } from '../shared/InlineNotice';
 import { detectChip, wipeChip } from '../../lib/api';
 import type { DetectChipResult } from '../../lib/api';
 
@@ -10,33 +12,10 @@ interface EraseViewProps {
   port?: string;
 }
 
-const SPINNER_FRAMES = ['|', '/', '-', '\\'];
-
 export function EraseView({ port }: EraseViewProps) {
-  const sfx = useSfx();
   const [phase, setPhase] = useState<Phase>('idle');
   const [chip, setChip] = useState<DetectChipResult | null>(null);
   const [message, setMessage] = useState('');
-  const [dots, setDots] = useState('');
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
-
-  // Animated dots for detecting
-  useEffect(() => {
-    if (phase !== 'detecting') return;
-    const timer = setInterval(() => {
-      setDots(prev => (prev.length >= 3 ? '' : prev + '.'));
-    }, 400);
-    return () => clearInterval(timer);
-  }, [phase]);
-
-  // Spinner for erasing
-  useEffect(() => {
-    if (phase !== 'erasing') return;
-    const timer = setInterval(() => {
-      setSpinnerIdx(prev => (prev + 1) % SPINNER_FRAMES.length);
-    }, 100);
-    return () => clearInterval(timer);
-  }, [phase]);
 
   const handleDetect = useCallback(async () => {
     if (!port || phase === 'detecting' || phase === 'erasing') return;
@@ -84,227 +63,313 @@ export function EraseView({ port }: EraseViewProps) {
     setMessage('');
   }, []);
 
-  const buttonStyle: React.CSSProperties = {
-    background: 'var(--bg-void)',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '13px',
-    fontWeight: 600,
-    padding: '8px 24px',
-    cursor: 'pointer',
-    textTransform: 'uppercase',
-  };
-
   const noPort = !port;
 
   return (
-    <TerminalPanel title="ERASE">
-      <div style={{ fontSize: '13px', lineHeight: '1.8', maxWidth: '500px' }}>
-
-        {/* No device connected */}
-        {noPort && (
-          <div style={{ color: 'var(--green-dim)' }}>
-            [~] No device connected. Go to SCAN tab and connect a Proxmark3 first.
-          </div>
-        )}
-
-        {/* Idle — ready to detect */}
-        {!noPort && phase === 'idle' && (
-          <>
-            <div style={{ color: 'var(--green-dim)', marginBottom: '12px' }}>
-              Place a card on the reader and press DETECT to identify the chip type.
-            </div>
-            <div style={{ color: 'var(--green-dim)', marginBottom: '16px', fontSize: '11px' }}>
-              [!] This will permanently erase all data on the card.
-            </div>
-            <button
-              onClick={() => { sfx.action(); handleDetect(); }}
-              style={{
-                ...buttonStyle,
-                color: 'var(--green-bright)',
-                border: '2px solid var(--green-bright)',
-              }}
-              onMouseEnter={(e) => {
-                sfx.hover();
-                e.currentTarget.style.background = 'var(--green-ghost)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--bg-void)';
-              }}
-            >
-              DETECT CHIP
-            </button>
-          </>
-        )}
-
-        {/* Detecting chip */}
-        {phase === 'detecting' && (
-          <div style={{ color: 'var(--amber)' }}>
-            DETECTING CHIP{dots}
-          </div>
-        )}
-
-        {/* Chip detected — show info + erase button */}
-        {phase === 'detected' && chip && (
-          <>
-            <div style={{ color: 'var(--green-bright)', fontWeight: 700, marginBottom: '8px' }}>
-              [+] CHIP DETECTED
-            </div>
-            <div style={{ marginBottom: '4px' }}>
-              <span style={{ color: 'var(--green-dim)' }}>{'Type... '}</span>
-              <span style={{ color: 'var(--green-bright)' }}>{chip.chipType}</span>
-            </div>
-            {chip.passwordProtected && (
-              <div style={{ marginBottom: '4px' }}>
-                <span style={{ color: 'var(--amber)' }}>[!] Password-protected</span>
-              </div>
-            )}
-            <div style={{ marginBottom: '16px' }}>
-              <span style={{ color: 'var(--green-dim)' }}>{chip.details}</span>
-            </div>
-
-            <div style={{
-              color: 'var(--red-bright)',
-              marginBottom: '16px',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}>
-              [!!] WARNING: This will erase ALL data on the {chip.chipType} chip.
-              {chip.passwordProtected && ' Password will be reset.'}
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                onClick={() => { sfx.action(); handleErase(); }}
-                style={{
-                  ...buttonStyle,
-                  color: 'var(--red-bright)',
-                  border: '2px solid var(--red-bright)',
-                }}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.background = 'rgba(255, 0, 51, 0.08)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-void)';
-                }}
-              >
-                ERASE CHIP
-              </button>
-              <button
-                onClick={() => { sfx.action(); handleReset(); }}
-                style={{
-                  ...buttonStyle,
-                  color: 'var(--green-bright)',
-                  border: '2px solid var(--green-bright)',
-                }}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.background = 'var(--green-ghost)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-void)';
-                }}
-              >
-                CANCEL
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Erasing */}
-        {phase === 'erasing' && (
-          <div>
-            <div style={{ color: 'var(--amber)' }}>
-              [{SPINNER_FRAMES[spinnerIdx]}] Erasing {chip?.chipType ?? 'chip'}...
-            </div>
-            <div style={{ color: 'var(--green-dim)', marginTop: '4px', fontSize: '12px' }}>
-              Do not remove the card from the reader.
-            </div>
-          </div>
-        )}
-
-        {/* Complete */}
-        {phase === 'complete' && (
-          <>
-            <div style={{ color: 'var(--green-bright)', fontSize: '16px', fontWeight: 700, marginBottom: '8px' }}>
-              [OK] ERASE COMPLETE
-            </div>
-            {message && (
-              <div style={{ color: 'var(--green-dim)', marginBottom: '16px' }}>
-                {message}
-              </div>
-            )}
-            <button
-              onClick={() => { sfx.action(); handleReset(); }}
-              style={{
-                ...buttonStyle,
-                color: 'var(--green-bright)',
-                border: '2px solid var(--green-bright)',
-              }}
-              onMouseEnter={(e) => {
-                sfx.hover();
-                e.currentTarget.style.background = 'var(--green-ghost)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--bg-void)';
-              }}
-            >
-              {'-->'} ERASE ANOTHER
-            </button>
-          </>
-        )}
-
-        {/* Error */}
-        {phase === 'error' && (
-          <>
-            <div style={{ color: 'var(--red-bright)', fontSize: '16px', fontWeight: 700, marginBottom: '8px' }}>
-              [!!] ERASE FAILED
-            </div>
-            {message && (
-              <div style={{ color: 'var(--red-bright)', marginBottom: '16px', fontSize: '12px' }}>
-                {message}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                onClick={() => { sfx.action(); handleDetect(); }}
-                style={{
-                  ...buttonStyle,
-                  color: 'var(--amber)',
-                  border: '2px solid var(--amber)',
-                }}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.background = 'rgba(255, 184, 0, 0.08)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-void)';
-                }}
-              >
-                RETRY
-              </button>
-              <button
-                onClick={() => { sfx.action(); handleReset(); }}
-                style={{
-                  ...buttonStyle,
-                  color: 'var(--green-bright)',
-                  border: '2px solid var(--green-bright)',
-                }}
-                onMouseEnter={(e) => {
-                  sfx.hover();
-                  e.currentTarget.style.background = 'var(--green-ghost)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-void)';
-                }}
-              >
-                RESET
-              </button>
-            </div>
-          </>
-        )}
-
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      {/* Header */}
+      <div>
+        <h2 style={{
+          fontSize: '20px',
+          fontWeight: 700,
+          color: 'var(--text-primary)',
+          fontFamily: 'var(--font-sans)',
+          margin: 0,
+          letterSpacing: '-0.02em',
+        }}>
+          Erase Card
+        </h2>
+        <p style={{
+          fontSize: '14px',
+          color: 'var(--text-tertiary)',
+          fontFamily: 'var(--font-sans)',
+          margin: 'var(--space-1) 0 0 0',
+        }}>
+          Detect a card's chip type and erase all data.
+        </p>
       </div>
-    </TerminalPanel>
+
+      {/* No device connected */}
+      {noPort && (
+        <InlineNotice variant="warning">
+          No device connected. Go to the Scan tab and connect a Proxmark3 first.
+        </InlineNotice>
+      )}
+
+      {/* Idle -- ready to detect */}
+      {!noPort && phase === 'idle' && (
+        <Card title="Step 1: Detect Chip">
+          <p style={{
+            fontSize: '14px',
+            color: 'var(--text-secondary)',
+            fontFamily: 'var(--font-sans)',
+            margin: '0 0 var(--space-3) 0',
+            lineHeight: '1.5',
+          }}>
+            Place a card on the reader and press Detect to identify the chip type.
+          </p>
+          <InlineNotice variant="warning" style={{ marginBottom: 'var(--space-4)' }}>
+            This will permanently erase all data on the card.
+          </InlineNotice>
+          <Button variant="primary" onClick={handleDetect}>
+            Detect Chip
+          </Button>
+        </Card>
+      )}
+
+      {/* Detecting chip */}
+      {phase === 'detecting' && (
+        <Card>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+          }}>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 16 16"
+              style={{ animation: 'spin 0.8s linear infinite', color: 'var(--accent)' }}
+            >
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+            </svg>
+            <span style={{
+              fontSize: '14px',
+              fontWeight: 500,
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-sans)',
+            }}>
+              Detecting chip...
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* Chip detected -- show info + erase button */}
+      {phase === 'detected' && chip && (
+        <>
+          <Card title="Chip Detected">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {/* Chip type row */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <span style={{
+                  fontSize: '13px',
+                  color: 'var(--text-tertiary)',
+                  fontFamily: 'var(--font-sans)',
+                }}>
+                  Chip Type
+                </span>
+                <Badge variant="success" label={chip.chipType} />
+              </div>
+
+              {/* Password protected */}
+              {chip.passwordProtected && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <span style={{
+                    fontSize: '13px',
+                    color: 'var(--text-tertiary)',
+                    fontFamily: 'var(--font-sans)',
+                  }}>
+                    Protection
+                  </span>
+                  <Badge variant="warning" label="Password Protected" />
+                </div>
+              )}
+
+              {/* Details */}
+              {chip.details && (
+                <p style={{
+                  fontSize: '13px',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-sans)',
+                  margin: 0,
+                  lineHeight: '1.5',
+                }}>
+                  {chip.details}
+                </p>
+              )}
+            </div>
+          </Card>
+
+          {/* Warning + actions */}
+          <Card>
+            <InlineNotice variant="error" style={{ marginBottom: 'var(--space-4)' }}>
+              <strong>Warning:</strong> This will erase ALL data on the {chip.chipType} chip.
+              {chip.passwordProtected && ' Password will be reset.'}
+            </InlineNotice>
+
+            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+              <Button variant="destructive" onClick={handleErase}>
+                Erase Chip
+              </Button>
+              <Button variant="secondary" onClick={handleReset}>
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Erasing */}
+      {phase === 'erasing' && (
+        <Card>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-2)',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+            }}>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 16 16"
+                style={{ animation: 'spin 0.8s linear infinite', color: 'var(--warning)' }}
+              >
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+              </svg>
+              <span style={{
+                fontSize: '14px',
+                fontWeight: 500,
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-sans)',
+              }}>
+                Erasing {chip?.chipType ?? 'chip'}...
+              </span>
+            </div>
+            <p style={{
+              fontSize: '13px',
+              color: 'var(--text-tertiary)',
+              fontFamily: 'var(--font-sans)',
+              margin: 0,
+              paddingLeft: 'calc(20px + var(--space-3))',
+            }}>
+              Do not remove the card from the reader.
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {/* Complete */}
+      {phase === 'complete' && (
+        <Card>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-3)',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+            }}>
+              <div style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: 'var(--radius-full)',
+                background: 'var(--success-bg)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 8.5L6.5 11L12 5" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <span style={{
+                fontSize: '16px',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-sans)',
+              }}>
+                Erase Complete
+              </span>
+            </div>
+            {message && (
+              <p style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                fontFamily: 'var(--font-sans)',
+                margin: 0,
+              }}>
+                {message}
+              </p>
+            )}
+            <div>
+              <Button variant="primary" onClick={handleReset}>
+                Erase Another
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Error */}
+      {phase === 'error' && (
+        <Card>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-3)',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+            }}>
+              <div style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: 'var(--radius-full)',
+                background: 'var(--error-bg)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M5 5L11 11M11 5L5 11" stroke="var(--error)" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </div>
+              <span style={{
+                fontSize: '16px',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-sans)',
+              }}>
+                Erase Failed
+              </span>
+            </div>
+            {message && (
+              <InlineNotice variant="error">
+                {message}
+              </InlineNotice>
+            )}
+            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+              <Button variant="primary" onClick={handleDetect}>
+                Retry
+              </Button>
+              <Button variant="secondary" onClick={handleReset}>
+                Reset
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }

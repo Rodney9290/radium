@@ -1,4 +1,12 @@
+pub mod capabilities;
 pub mod command_builder;
 pub mod connection;
+pub mod device_finder;
+pub mod linux_perms;
 pub mod output_parser;
+pub mod session;
+pub mod transport;
+pub mod transport_cli;
+pub mod transport_interactive;
+pub mod types;
 pub mod version;

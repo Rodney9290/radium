@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { ConnectStep } from './ConnectStep';
 import { ScanStep } from './ScanStep';
 import { BlankStep } from './BlankStep';
@@ -8,10 +9,29 @@ import { ErrorStep } from './ErrorStep';
 import { FirmwareUpdateStep } from './FirmwareUpdateStep';
 import { HfProcessStep } from './HfProcessStep';
 import { HfDumpReadyStep } from './HfDumpReadyStep';
+import { PermissionFixStep } from './PermissionFixStep';
 import { useWizard } from '../../hooks/useWizard';
+import { checkDevicePermissions } from '../../lib/api';
+import type { PermissionCheck } from '../../lib/api';
 
 export function WizardContainer() {
   const wizard = useWizard();
+  const [permCheck, setPermCheck] = useState<PermissionCheck | null>(null);
+
+  // When detection fails, check Linux permissions to see if that's the cause
+  useEffect(() => {
+    if (wizard.currentStep === 'Error' && wizard.context.errorSource === 'detect') {
+      checkDevicePermissions().then((check) => {
+        if (!check.hasPermission) {
+          setPermCheck(check);
+        }
+      }).catch(() => {
+        // Permission check itself failed — just show normal error
+      });
+    } else {
+      setPermCheck(null);
+    }
+  }, [wizard.currentStep, wizard.context.errorSource]);
 
   const renderStep = () => {
     switch (wizard.currentStep) {
@@ -172,7 +192,6 @@ export function WizardContainer() {
               if (!port || !blankType) return;
               const { wipeChip } = await import('../../lib/api');
               await wipeChip(port, blankType);
-              // Re-detect blank after erase (BlankDetected -> WaitingForBlank)
               await wizard.reDetectBlank();
             }}
           />
@@ -218,6 +237,21 @@ export function WizardContainer() {
           />
         );
       case 'Error':
+        // Show Linux permission fix UI when detection failed due to permissions
+        if (permCheck && wizard.context.errorSource === 'detect') {
+          return (
+            <PermissionFixStep
+              check={permCheck}
+              onRetry={async () => {
+                setPermCheck(null);
+                await wizard.reset();
+                // Small delay to let XState settle into idle before detecting
+                setTimeout(() => wizard.detect(), 50);
+              }}
+              onDismiss={() => setPermCheck(null)}
+            />
+          );
+        }
         return (
           <ErrorStep
             message={wizard.context.errorUserMessage}
@@ -231,12 +265,12 @@ export function WizardContainer() {
       default:
         return (
           <div style={{
-            color: 'var(--red-bright)',
+            color: 'var(--error)',
             fontSize: '13px',
-            padding: '24px',
+            padding: 'var(--space-6)',
             fontFamily: 'var(--font-mono)',
           }}>
-            [!!] Unknown state: {wizard.currentStep}
+            Unknown state: {wizard.currentStep}
           </div>
         );
     }
@@ -250,9 +284,7 @@ export function WizardContainer() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '24px',
-        position: 'relative',
-        zIndex: 5,
+        padding: 'var(--space-6)',
       }}
     >
       {renderStep()}

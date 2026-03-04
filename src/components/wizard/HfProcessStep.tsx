@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { TerminalPanel } from '../shared/TerminalPanel';
+import { Card } from '../shared/Card';
+import { Button } from '../shared/Button';
 import { ProgressBar } from '../shared/ProgressBar';
-import { useSfx } from '../../hooks/useSfx';
+import { InlineNotice } from '../shared/InlineNotice';
 import type { CardType } from '../../machines/types';
 
 interface HfProcessStepProps {
@@ -12,8 +13,6 @@ interface HfProcessStepProps {
   elapsed: number;
   onCancel: () => void;
 }
-
-const SPINNER_FRAMES = ['|', '/', '-', '\\'];
 
 /** Format seconds as MM:SS */
 function formatTime(secs: number): string {
@@ -59,25 +58,15 @@ export function HfProcessStep({
   keysTotal,
   onCancel,
 }: HfProcessStepProps) {
-  const sfx = useSfx();
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [localElapsed, setLocalElapsed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Spinner animation
+  // Client-side elapsed timer -- ticks every second independently of Rust events
   useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setSpinnerIdx(prev => (prev + 1) % SPINNER_FRAMES.length);
-    }, 100);
+    intervalRef.current = setInterval(() => setLocalElapsed(s => s + 1), 1000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
-
-  // Client-side elapsed timer — ticks every second independently of Rust events
-  useEffect(() => {
-    const timer = setInterval(() => setLocalElapsed(s => s + 1), 1000);
-    return () => clearInterval(timer);
   }, []);
 
   const classic = isClassic(cardType);
@@ -85,70 +74,61 @@ export function HfProcessStep({
     ? Math.round((keysFound / keysTotal) * 100)
     : 0;
 
-  const btnBase: React.CSSProperties = {
-    background: 'var(--bg-void)',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '13px',
-    fontWeight: 600,
-    padding: '6px 20px',
-    cursor: 'pointer',
-  };
-
   return (
-    <TerminalPanel title="HF PROCESSING">
-      <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
-        <div style={{ color: 'var(--green-bright)' }}>
-          [=] KEY RECOVERY — {cardLabel(cardType)}
+    <Card title="HF Processing" style={{ maxWidth: '440px', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
+          Key Recovery -- {cardLabel(cardType)}
         </div>
 
-        <div style={{ color: 'var(--green-dim)', marginTop: '8px' }}>
-          ATTACK : {phaseLabel(phase)} {SPINNER_FRAMES[spinnerIdx]}
-        </div>
-        <div style={{ color: 'var(--green-dim)' }}>
-          TIME   : {formatTime(localElapsed)}
+        {/* Info rows */}
+        <div style={{
+          background: 'var(--bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          padding: 'var(--space-3) var(--space-4)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+        }}>
+          <InfoRow label="Phase" value={phaseLabel(phase)} />
+          <InfoRow label="Elapsed" value={formatTime(localElapsed)} mono />
+          {classic && (
+            <InfoRow label="Keys" value={`${keysFound} / ${keysTotal}`} mono />
+          )}
+          {!classic && (
+            <InfoRow label="Status" value="Dumping card memory..." />
+          )}
         </div>
 
+        {/* Progress bar for Classic cards */}
         {classic && (
-          <>
-            <div style={{ color: 'var(--green-dim)' }}>
-              KEYS   : {keysFound}/{keysTotal}
-            </div>
-            <div style={{ marginTop: '12px' }}>
-              <ProgressBar value={progress} width={24} />
-            </div>
-          </>
+          <ProgressBar value={progress} />
         )}
 
-        {!classic && (
-          <div style={{ color: 'var(--green-dim)', marginTop: '4px' }}>
-            PHASE  : Dumping card memory...
-          </div>
-        )}
+        <InlineNotice variant="warning">
+          Do not remove the card from the reader.
+        </InlineNotice>
 
-        <div style={{ color: 'var(--amber)', marginTop: '16px', fontSize: '12px' }}>
-          [!] Do not remove the card from the reader
-        </div>
-
-        <div style={{ marginTop: '16px' }}>
-          <button
-            onClick={() => { sfx.action(); onCancel(); }}
-            style={{
-              ...btnBase,
-              color: 'var(--red-bright, #f33)',
-              border: '2px solid var(--red-bright, #f33)',
-            }}
-            onMouseEnter={(e) => {
-              sfx.hover();
-              e.currentTarget.style.background = 'rgba(255, 0, 51, 0.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--bg-void)';
-            }}
-          >
-            [CANCEL]
-          </button>
-        </div>
+        <Button variant="destructive" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
       </div>
-    </TerminalPanel>
+    </Card>
+  );
+}
+
+function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+      <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
+      <span style={{
+        color: 'var(--text-primary)',
+        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
+        fontSize: mono ? '12px' : '13px',
+        fontVariantNumeric: mono ? 'tabular-nums' : undefined,
+      }}>
+        {value}
+      </span>
+    </div>
   );
 }

@@ -23,8 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Sidecar binaries + DLLs (GPL — download from Iceman fork releases)
-src-tauri/binaries/*.exe
+# Sidecar binaries + DLLs (build from source or download from Iceman fork releases)
+src-tauri/binaries/proxmark3*
 src-tauri/pm3-libs/
 
 # Firmware .elf files (download from proxmarkbuilds.org)

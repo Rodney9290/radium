@@ -1,26 +1,49 @@
 interface ProgressBarProps {
-  value: number; // 0-100
-  width?: number; // total char width, default 20
+  value: number;
+  size?: 'sm' | 'md';
+  showLabel?: boolean;
+  color?: string;
 }
 
-export function ProgressBar({ value, width = 20 }: ProgressBarProps) {
+export function ProgressBar({ value, size = 'md', showLabel = true, color }: ProgressBarProps) {
   const clamped = Math.max(0, Math.min(100, value));
-  const filled = Math.round((clamped / 100) * width);
-  const empty = width - filled;
-
-  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(empty);
-  const pct = `${Math.round(clamped)}%`;
+  const height = size === 'sm' ? '4px' : '8px';
 
   return (
-    <span
-      style={{
-        fontFamily: 'var(--font-mono)',
-        fontSize: '13px',
-        whiteSpace: 'pre',
-      }}
-    >
-      <span style={{ color: 'var(--green-bright)' }}>{bar}</span>
-      <span style={{ color: 'var(--green-mid)', marginLeft: '8px' }}>{pct}</span>
-    </span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', width: '100%' }}>
+      <div
+        style={{
+          flex: 1,
+          height,
+          background: 'var(--bg-tertiary)',
+          borderRadius: 'var(--radius-full)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            width: `${clamped}%`,
+            height: '100%',
+            background: color || 'var(--accent)',
+            borderRadius: 'var(--radius-full)',
+            transition: 'width var(--transition-normal)',
+          }}
+        />
+      </div>
+      {showLabel && (
+        <span
+          style={{
+            fontSize: '13px',
+            fontWeight: 500,
+            color: 'var(--text-secondary)',
+            minWidth: '36px',
+            textAlign: 'right',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {Math.round(clamped)}%
+        </span>
+      )}
+    </div>
   );
 }
