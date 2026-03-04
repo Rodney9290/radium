@@ -42,7 +42,7 @@ Proxmark3 firmware v4.20728+ recommended.
 
 ### Linux additional requirements
 
-On Linux, your user must be in the `dialout` and `plugdev` groups, and udev rules must be installed for the Proxmark3 device. Radium checks permissions automatically and provides the fix commands if needed. See `resources/77-proxmark3.rules`.
+On Linux, your user must be in the `dialout` and `plugdev` groups, and udev rules must be installed for the Proxmark3 device. Radium checks permissions automatically and provides the fix commands if needed. See `src-tauri/resources/77-proxmark3.rules`.
 
 On Linux, Radium uses the system-installed PM3 client (found via PATH). Install the Proxmark3 client from your distribution's package manager or build from source.
 
@@ -57,7 +57,7 @@ git clone https://github.com/Rodney9290/radium.git
 cd radium
 npm install
 npx tauri dev      # development
-npx tauri build    # production build (Windows: NSIS, macOS: .dmg, Linux: deb + AppImage)
+npx tauri build    # production build (macOS: .dmg, Linux: deb + AppImage)
 ```
 
 The Proxmark3 client sidecar binary must be placed in `src-tauri/binaries/` named `proxmark3-{target_triple}` (e.g. `proxmark3-x86_64-apple-darwin` for macOS). Build it from the [Iceman fork](https://github.com/RfidResearchGroup/proxmark3) with `make client`.
