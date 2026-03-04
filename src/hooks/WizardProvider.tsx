@@ -107,6 +107,12 @@ interface WriteProgressPayload {
   total_blocks: number | null;
 }
 
+interface DeviceStatusPayload {
+  status: string;
+  port?: string;
+  reason?: string;
+}
+
 export function WizardProvider({ children }: { children: ReactNode }) {
   const [state, send] = useMachine(wizardMachine);
 
@@ -164,6 +170,30 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       unlistenFailed.then((fn) => fn());
     };
   }, [send]);
+
+  // Listen for device-status events (connect/disconnect/reconnect)
+  useEffect(() => {
+    const unlisten = listen<DeviceStatusPayload>('device-status', (event) => {
+      const { status, port, reason } = event.payload;
+      switch (status) {
+        case 'disconnected':
+          console.warn(`[device] Disconnected${reason ? `: ${reason}` : ''}`);
+          break;
+        case 'reconnecting':
+          console.info('[device] Reconnecting...');
+          break;
+        case 'reconnected':
+          console.info(`[device] Reconnected${port ? ` on ${port}` : ''}`);
+          break;
+        case 'connected':
+          console.info(`[device] Connected${port ? ` on ${port}` : ''}`);
+          break;
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   const stateValue = state.value as StepName;
   const currentStep = STATE_TO_STEP[stateValue] ?? 'Idle';
