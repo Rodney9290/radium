@@ -93,11 +93,14 @@ For HF cards (MIFARE Classic), Radium runs automatic key recovery (autopwn) befo
 - **Blank card data check** warns if the blank already has data written to it
 - **Firmware flash** with variant picker (RDV4, RDV4+BT, Generic, iCopy-X)
 - **Device capability detection** — identifies device model, firmware, hardware variant
+- **Auto-reconnect** — automatically recovers from USB disconnects and PM3 crashes without manual intervention
+- **Parallel device discovery** — probes up to 4 serial ports concurrently for faster connection
 - **Saved cards** — save scanned cards to local database for later cloning
-- **Clone history** — track all past clone operations
+- **Clone history** — track all past clone operations with search, filters, and bulk management
 - **Chip erase** — standalone T5577/EM4305 wipe tool
 - **Expert mode** — raw PM3 command input in the console drawer
 - **Linux permissions checker** — detects missing group membership / udev rules and shows fix commands
+- **Keyboard shortcuts** — Cmd+1-5 for tabs, Cmd+D to connect, Cmd+R to refresh
 - **Sound effects and music** — optional audio feedback and ambient music (off by default)
 - **Dark mode** — follows system preference
 
@@ -105,18 +108,20 @@ For HF cards (MIFARE Classic), Radium runs automatic key recovery (autopwn) befo
 
 ```
 Frontend (React 19 + XState v5 + TypeScript)
-├── Apple-esque design system (system fonts, light/dark mode)
+├── Design system (system fonts, light/dark mode)
 ├── SegmentedControl tab navigation (Clone, Erase, Saved, History, Settings)
 ├── 12 wizard step components
 ├── Shared component library (Button, Card, ProgressBar, Badge, etc.)
 └── Tauri IPC → Rust backend
 
 Backend (Rust / Tauri v2)
-├── Pm3Session — command serialization, transport abstraction
+├── Pm3Session — command serialization, transport abstraction, auto-recovery
 ├── Pm3Transport trait — pluggable backends (interactive CLI, batch CLI fallback)
+├── DeviceFinder — parallel port probing, last-known port caching
 ├── DeviceCapabilities — model detection, firmware version, hardware variant
 ├── Output parser — regex-based parsing of PM3 CLI output
 ├── Command builder — type-safe PM3 command construction
+├── Device status events — structured connection lifecycle events
 ├── Linux permissions — group/udev checking
 └── SQLite — saved cards, clone history
 ```
@@ -130,8 +135,12 @@ Tauri v2, React 19, TypeScript, XState v5, Rust. Dual state machine architecture
 Radium is a fork of [Phosphor](https://github.com/nikitaart2000/phosphor) by nikitaart2000, modified in 2025–2026 with:
 
 - Persistent PM3 session manager with transport abstraction (interactive + batch fallback)
+- Parallel device discovery with last-known port caching and auto-reconnect
+- Transport health monitoring with transparent crash recovery
 - Linux support (permission checker, udev rules, AppImage/deb packaging)
 - Device capability detection (model, firmware, hardware variant)
+- Keyboard shortcuts (Cmd+1-5 tabs, Cmd+D connect, Cmd+R refresh)
+- Clone history with search, status/date filters, and delete
 - Renamed from Phosphor to Radium
 
 ## License

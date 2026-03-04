@@ -142,4 +142,20 @@ impl Database {
         conn.execute("DELETE FROM saved_cards WHERE id = ?1", params![id])?;
         Ok(())
     }
+
+    pub fn delete_history_record(&self, id: i64) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::DatabaseError(format!("Lock poisoned: {}", e))
+        })?;
+        conn.execute("DELETE FROM clone_log WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn clear_history(&self) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::DatabaseError(format!("Lock poisoned: {}", e))
+        })?;
+        conn.execute("DELETE FROM clone_log", [])?;
+        Ok(())
+    }
 }

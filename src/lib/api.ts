@@ -1,6 +1,6 @@
 // Typed Tauri invoke wrappers for PM3 backend commands.
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './tauriSafe';
 import type { WizardState, CloneRecord, BlankType, FirmwareCheckResult, DeviceCapabilities } from '../machines/types';
 
 export interface SavedCard {
@@ -103,6 +103,20 @@ export async function getHistory(): Promise<CloneRecord[]> {
  */
 export async function saveCloneRecord(record: CloneRecord): Promise<number> {
   return invoke<number>('save_clone_record', { record });
+}
+
+/**
+ * Delete a single history record by ID.
+ */
+export async function deleteHistoryRecord(id: number): Promise<void> {
+  return invoke<void>('delete_history_record', { id });
+}
+
+/**
+ * Delete all clone history records.
+ */
+export async function clearHistory(): Promise<void> {
+  return invoke<void>('clear_history');
 }
 
 /**

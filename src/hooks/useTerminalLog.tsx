@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../lib/tauriSafe';
 
 export interface LogLine {
   text: string;

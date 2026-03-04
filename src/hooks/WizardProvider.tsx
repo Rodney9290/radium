@@ -4,8 +4,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { useMachine } from '@xstate/react';
-import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
+import { listen, invoke } from '../lib/tauriSafe';
 import { wizardMachine } from '../machines/wizardMachine';
 import type { WizardContext as WizCtx, WizardEvent } from '../machines/wizardMachine';
 import type { WizardStepName, WizardState, BlankType, FirmwareProgress, HfProgressPayload } from '../machines/types';

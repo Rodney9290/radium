@@ -1,15 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
-interface RadiumSettings {
+export interface RadiumSettings {
   expertMode: boolean;
   soundEffects: boolean;
   backgroundMusic: boolean;
+  onboardingCompleted: boolean;
+  theme: 'system' | 'light' | 'dark';
+  musicVolume: number;
+  autoReconnect: boolean;
 }
 
 const DEFAULT_SETTINGS: RadiumSettings = {
   expertMode: false,
   soundEffects: false,
   backgroundMusic: false,
+  onboardingCompleted: false,
+  theme: 'system',
+  musicVolume: 30,
+  autoReconnect: true,
 };
 
 const STORAGE_KEY = 'radium-settings';

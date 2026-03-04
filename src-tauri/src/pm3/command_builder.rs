@@ -614,6 +614,7 @@ pub fn build_hf_iclass_info() -> &'static str {
     "hf iclass info"
 }
 
+#[allow(dead_code)]
 pub fn build_hf_mfdes_info() -> &'static str {
     "hf mfdes info"
 }
@@ -677,6 +678,7 @@ pub fn build_mf_gload(dump_path: &str) -> String {
 }
 
 /// Gen4 GDM: write a single block. `blk`: 0-255, `data`: 32 hex chars.
+#[allow(dead_code)]
 pub fn build_mf_gdm_setblk(blk: u16, data: &str) -> String {
     format!("hf mf gdmsetblk --blk {} -d {}", blk, data)
 }

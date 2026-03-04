@@ -240,7 +240,12 @@ impl Pm3Transport for CliTransportInteractive {
     }
 
     async fn is_alive(&self) -> bool {
-        self.alive.lock().map(|a| *a).unwrap_or(false)
+        let flag = self.alive.lock().map(|a| *a).unwrap_or(false);
+        if !flag {
+            return false;
+        }
+        // Also check that the child process handle still exists
+        self.child.lock().map(|c| c.is_some()).unwrap_or(false)
     }
 
     fn cancel(&self) -> Result<(), AppError> {

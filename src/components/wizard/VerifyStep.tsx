@@ -1,6 +1,7 @@
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { InlineNotice } from '../shared/InlineNotice';
+import { Spinner } from '../shared/Spinner';
 
 interface VerifyStepProps {
   onContinue: () => void;
@@ -25,12 +26,10 @@ export function VerifyStep({ onContinue, onRetryWrite, onReset, isLoading, succe
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '24px',
+            animation: 'subtlePulse 2s ease-in-out infinite',
           }}>
-            <span style={{ animation: 'spin 1.5s linear infinite' }}>
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-              &#x21BB;
-            </span>
+            <style>{`@keyframes subtlePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }`}</style>
+            <Spinner size={24} />
           </div>
           <div>
             <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'var(--space-1)' }}>

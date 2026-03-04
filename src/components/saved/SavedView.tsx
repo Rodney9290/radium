@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { Badge } from '../shared/Badge';
 import { InlineNotice } from '../shared/InlineNotice';
-import { getSavedCards, deleteSavedCard, type SavedCard } from '../../lib/api';
+import { getSavedCards, deleteSavedCard, saveCard, type SavedCard } from '../../lib/api';
 import { useWizard } from '../../hooks/useWizard';
 
 function formatLocalTime(isoStr: string): string {
@@ -55,15 +55,104 @@ const valueStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
-export function SavedView() {
+const searchInputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: 'var(--space-3) var(--space-4)',
+  paddingLeft: 'var(--space-10)',
+  fontSize: '14px',
+  fontFamily: 'var(--font-sans)',
+  background: 'var(--bg-primary)',
+  border: '1px solid var(--border-secondary)',
+  borderRadius: 'var(--radius-full)',
+  color: 'var(--text-primary)',
+  outline: 'none',
+  transition: 'border-color var(--transition-fast)',
+};
+
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{
+      position: 'absolute', left: 'var(--space-4)', top: '50%',
+      transform: 'translateY(-50%)', color: 'var(--text-quaternary)',
+    }}>
+      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+interface SavedViewProps {
+  refreshTrigger?: number;
+}
+
+export function SavedView({ refreshTrigger }: SavedViewProps) {
   const [cards, setCards] = useState<SavedCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const wizard = useWizard();
 
   const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
+
+  // External refresh trigger (keyboard shortcut)
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) refresh();
+  }, [refreshTrigger, refresh]);
+
+  const filteredCards = searchQuery.trim()
+    ? cards.filter(card => {
+        const q = searchQuery.toLowerCase();
+        return (
+          card.name.toLowerCase().includes(q) ||
+          card.cardType.toLowerCase().includes(q) ||
+          card.uid.toLowerCase().includes(q)
+        );
+      })
+    : cards;
+
+  const handleExport = () => {
+    const json = JSON.stringify(cards, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `radium-cards-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportError(null);
+    try {
+      const text = await file.text();
+      const imported = JSON.parse(text);
+      if (!Array.isArray(imported)) throw new Error('Invalid format: expected array');
+      for (const card of imported) {
+        await saveCard({
+          name: card.name ?? 'Imported Card',
+          cardType: card.cardType ?? '',
+          frequency: card.frequency ?? '',
+          uid: card.uid ?? '',
+          raw: card.raw ?? '',
+          decoded: typeof card.decoded === 'string' ? card.decoded : JSON.stringify(card.decoded ?? {}),
+          cloneable: card.cloneable ?? false,
+          recommendedBlank: card.recommendedBlank ?? 'T5577',
+          createdAt: card.createdAt ?? new Date().toISOString(),
+        });
+      }
+      refresh();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import cards');
+    }
+    e.target.value = '';
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -254,17 +343,49 @@ export function SavedView() {
             fontFamily: 'var(--font-sans)',
             margin: 'var(--space-1) 0 0 0',
           }}>
-            {cards.length} card{cards.length !== 1 ? 's' : ''} saved
+            {searchQuery.trim()
+              ? `${filteredCards.length} of ${cards.length} cards`
+              : `${cards.length} card${cards.length !== 1 ? 's' : ''} saved`}
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={refresh}>
-          Refresh
-        </Button>
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <Button variant="secondary" size="sm" onClick={handleExport}>Export</Button>
+          <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>Import</Button>
+          <Button variant="ghost" size="sm" onClick={refresh}>Refresh</Button>
+          <input ref={fileInputRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+        </div>
       </div>
+
+      {/* Search */}
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text"
+          placeholder="Search by name, type, or UID..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={searchInputStyle}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-secondary)'; }}
+        />
+        <SearchIcon />
+      </div>
+
+      {importError && <InlineNotice variant="error">Import failed: {importError}</InlineNotice>}
+
+      {/* Empty search */}
+      {filteredCards.length === 0 && searchQuery.trim() && (
+        <Card>
+          <div style={{ textAlign: 'center', padding: 'var(--space-6) 0' }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)', margin: 0 }}>
+              No cards match your search
+            </p>
+          </div>
+        </Card>
+      )}
 
       {/* Card list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        {cards.map((card, idx) => {
+        {filteredCards.map((card, idx) => {
           const isExpanded = card.id === expandedId;
 
           return (

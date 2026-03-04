@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { Badge } from '../shared/Badge';
 import { InlineNotice } from '../shared/InlineNotice';
-import { getHistory } from '../../lib/api';
+import { SegmentedControl } from '../shared/SegmentedControl';
+import { getHistory, deleteHistoryRecord, clearHistory } from '../../lib/api';
 import type { CloneRecord } from '../../machines/types';
 
 interface HistoryRecord {
   id: number;
   source: string;
   target: string;
-  uid: string;
+  sourceUid: string;
+  targetUid: string;
   date: string;
+  rawTimestamp: string;
   status: 'ok' | 'fail';
 }
 
@@ -23,13 +26,15 @@ function formatLocalTime(isoStr: string): string {
 }
 
 /** Map backend CloneRecord to display HistoryRecord */
-function toHistoryRecord(r: CloneRecord, index: number): HistoryRecord {
+function toHistoryRecord(r: CloneRecord): HistoryRecord {
   return {
-    id: index + 1,
+    id: r.id ?? 0,
     source: r.source_type,
     target: r.target_type,
-    uid: r.source_uid || '---',
+    sourceUid: r.source_uid || '---',
+    targetUid: r.target_uid || '---',
     date: formatLocalTime(r.timestamp),
+    rawTimestamp: r.timestamp,
     status: r.success ? 'ok' as const : 'fail' as const,
   };
 }
@@ -47,11 +52,56 @@ const rowValueStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
-export function HistoryView() {
+const searchInputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: 'var(--space-3) var(--space-4)',
+  paddingLeft: 'var(--space-10)',
+  fontSize: '14px',
+  fontFamily: 'var(--font-sans)',
+  background: 'var(--bg-primary)',
+  border: '1px solid var(--border-secondary)',
+  borderRadius: 'var(--radius-full)',
+  color: 'var(--text-primary)',
+  outline: 'none',
+  transition: 'border-color var(--transition-fast)',
+};
+
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{
+      position: 'absolute', left: 'var(--space-4)', top: '50%',
+      transform: 'translateY(-50%)', color: 'var(--text-quaternary)',
+    }}>
+      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+type StatusFilter = 'all' | 'success' | 'failed';
+type TimeFilter = 'all' | '7d' | '30d';
+
+interface HistoryViewProps {
+  refreshTrigger?: number;
+}
+
+export function HistoryView({ refreshTrigger }: HistoryViewProps) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+
+  const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
+
+  // External refresh trigger (keyboard shortcut)
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) refresh();
+  }, [refreshTrigger, refresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +129,58 @@ export function HistoryView() {
     return () => { cancelled = true; };
   }, [refreshKey]);
 
-  const handleRefresh = () => setRefreshKey((k) => k + 1);
+  const handleDelete = async (id: number) => {
+    try {
+      await deleteHistoryRecord(id);
+      setConfirmDeleteId(null);
+      refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete record';
+      setError(msg);
+    }
+  };
+
+  const handleClearAll = async () => {
+    try {
+      await clearHistory();
+      setConfirmClearAll(false);
+      refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to clear history';
+      setError(msg);
+    }
+  };
+
+  // Combined filter logic
+  const filteredRecords = records.filter(rec => {
+    // Status filter
+    if (statusFilter === 'success' && rec.status !== 'ok') return false;
+    if (statusFilter === 'failed' && rec.status !== 'fail') return false;
+
+    // Time filter
+    if (timeFilter !== 'all') {
+      const recordDate = new Date(rec.rawTimestamp);
+      const now = new Date();
+      const daysAgo = timeFilter === '7d' ? 7 : 30;
+      const cutoff = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000);
+      if (recordDate < cutoff) return false;
+    }
+
+    // Text search
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return (
+        rec.source.toLowerCase().includes(q) ||
+        rec.target.toLowerCase().includes(q) ||
+        rec.sourceUid.toLowerCase().includes(q) ||
+        rec.targetUid.toLowerCase().includes(q)
+      );
+    }
+
+    return true;
+  });
+
+  const hasActiveFilters = statusFilter !== 'all' || timeFilter !== 'all' || searchQuery.trim() !== '';
 
   // Loading state
   if (loading) {
@@ -147,7 +248,7 @@ export function HistoryView() {
           {error}
         </InlineNotice>
         <div>
-          <Button variant="secondary" onClick={handleRefresh}>
+          <Button variant="secondary" onClick={refresh}>
             Retry
           </Button>
         </div>
@@ -155,7 +256,7 @@ export function HistoryView() {
     );
   }
 
-  // Empty state
+  // Empty state (no records at all)
   if (records.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -217,17 +318,87 @@ export function HistoryView() {
             fontFamily: 'var(--font-sans)',
             margin: 'var(--space-1) 0 0 0',
           }}>
-            {records.length} record{records.length !== 1 ? 's' : ''} &middot; {successCount} successful
+            {hasActiveFilters
+              ? `${filteredRecords.length} of ${records.length} records`
+              : `${records.length} record${records.length !== 1 ? 's' : ''} \u00b7 ${successCount} successful`}
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleRefresh}>
-          Refresh
-        </Button>
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          {!confirmClearAll ? (
+            <Button variant="destructive" size="sm" onClick={() => setConfirmClearAll(true)}>
+              Clear All
+            </Button>
+          ) : (
+            <>
+              <Button variant="destructive" size="sm" onClick={handleClearAll}>
+                Yes, Clear
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmClearAll(false)}>
+                Cancel
+              </Button>
+            </>
+          )}
+          <Button variant="ghost" size="sm" onClick={refresh}>
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Search */}
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text"
+          placeholder="Search by UID, source, or target type..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={searchInputStyle}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-secondary)'; }}
+        />
+        <SearchIcon />
+      </div>
+
+      {/* Filters */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-3)',
+        flexWrap: 'wrap',
+      }}>
+        <SegmentedControl
+          options={[
+            { label: 'All', value: 'all' },
+            { label: 'Success', value: 'success' },
+            { label: 'Failed', value: 'failed' },
+          ]}
+          value={statusFilter}
+          onChange={(v) => setStatusFilter(v as StatusFilter)}
+        />
+        <SegmentedControl
+          options={[
+            { label: 'All Time', value: 'all' },
+            { label: '7 Days', value: '7d' },
+            { label: '30 Days', value: '30d' },
+          ]}
+          value={timeFilter}
+          onChange={(v) => setTimeFilter(v as TimeFilter)}
+        />
+      </div>
+
+      {/* Empty filter state */}
+      {filteredRecords.length === 0 && hasActiveFilters && (
+        <Card>
+          <div style={{ textAlign: 'center', padding: 'var(--space-6) 0' }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)', margin: 0 }}>
+              No records match your filters
+            </p>
+          </div>
+        </Card>
+      )}
 
       {/* Record list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        {records.map(rec => (
+        {filteredRecords.map(rec => (
           <Card key={rec.id}>
             <div style={{
               display: 'flex',
@@ -272,7 +443,7 @@ export function HistoryView() {
                 }}>
                   <div>
                     <span style={rowLabelStyle}>UID </span>
-                    <span style={rowValueStyle}>{rec.uid}</span>
+                    <span style={rowValueStyle}>{rec.sourceUid}</span>
                   </div>
                   <div>
                     <span style={rowLabelStyle}>Date </span>
@@ -281,11 +452,73 @@ export function HistoryView() {
                 </div>
               </div>
 
-              {/* Right side: status badge */}
-              <Badge
-                variant={rec.status === 'ok' ? 'success' : 'error'}
-                label={rec.status === 'ok' ? 'Success' : 'Failed'}
-              />
+              {/* Right side: status badge + delete */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexShrink: 0 }}>
+                <Badge
+                  variant={rec.status === 'ok' ? 'success' : 'error'}
+                  label={rec.status === 'ok' ? 'Success' : 'Failed'}
+                />
+                {confirmDeleteId === rec.id ? (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      onClick={() => handleDelete(rec.id)}
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        fontFamily: 'var(--font-sans)',
+                        color: 'var(--error)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '2px 6px',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        fontFamily: 'var(--font-sans)',
+                        color: 'var(--text-secondary)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '2px 6px',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(rec.id)}
+                    title="Delete record"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: 'none',
+                      background: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-quaternary)',
+                      transition: 'color var(--transition-fast)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--error)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-quaternary)'; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
           </Card>
         ))}

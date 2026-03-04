@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { InlineNotice } from '../shared/InlineNotice';
+import { Spinner } from '../shared/Spinner';
+import { OnboardingTip } from '../onboarding/OnboardingTip';
 import type { BlankType } from '../../machines/types';
 
 interface BlankStepProps {
@@ -37,6 +39,9 @@ export function BlankStep({ onReady, onErase, isLoading, expectedBlank, blankTyp
   if (isLoading) {
     return (
       <Card title="Blank Card" style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <OnboardingTip tipId="blank">
+          Now place a blank magic card on the reader. Use T5577 for LF cards, or Gen1a/CUID for HF cards.
+        </OnboardingTip>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)' }}>
           <div style={{
             width: '64px',
@@ -47,13 +52,10 @@ export function BlankStep({ onReady, onErase, isLoading, expectedBlank, blankTyp
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: '28px',
+            ...(erasing ? { animation: 'subtlePulse 2s ease-in-out infinite' } : {}),
           }}>
-            {erasing ? (
-              <span style={{ animation: 'spin 1.5s linear infinite' }}>
-                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                &#x21BB;
-              </span>
-            ) : '💳'}
+            {erasing && <style>{`@keyframes subtlePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }`}</style>}
+            {erasing ? <Spinner size={28} /> : '💳'}
           </div>
 
           <div>

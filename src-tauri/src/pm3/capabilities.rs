@@ -18,6 +18,7 @@ pub enum ProxmarkPlatform {
 
 impl ProxmarkPlatform {
     /// Human-readable display name.
+    #[allow(dead_code)]
     pub fn display_name(&self) -> &str {
         match self {
             ProxmarkPlatform::Easy => "Proxmark3 Easy",
@@ -29,6 +30,7 @@ impl ProxmarkPlatform {
     }
 
     /// Firmware build flag name used by the PM3 build system.
+    #[allow(dead_code)]
     pub fn firmware_platform(&self) -> &str {
         match self {
             ProxmarkPlatform::Easy | ProxmarkPlatform::Generic256 => "PM3GENERIC",
@@ -39,6 +41,7 @@ impl ProxmarkPlatform {
 
     /// Hardware variant string for firmware flash file selection.
     /// Maps to directory names under `firmware/`.
+    #[allow(dead_code)]
     pub fn flash_variant(&self) -> &str {
         match self {
             ProxmarkPlatform::Easy | ProxmarkPlatform::Generic256 => "generic",

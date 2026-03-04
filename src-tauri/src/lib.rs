@@ -42,6 +42,8 @@ pub fn run() {
             commands::write::verify_clone,
             commands::history::get_history,
             commands::history::save_clone_record,
+            commands::history::delete_history_record,
+            commands::history::clear_history,
             commands::firmware::check_firmware_version,
             commands::firmware::flash_firmware,
             commands::firmware::cancel_flash,

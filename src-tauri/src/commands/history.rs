@@ -32,3 +32,18 @@ pub fn save_clone_record(
     }
     db.insert_record(&record)
 }
+
+#[tauri::command]
+pub fn delete_history_record(
+    db: State<'_, Database>,
+    id: i64,
+) -> Result<(), AppError> {
+    db.delete_history_record(id)
+}
+
+#[tauri::command]
+pub fn clear_history(
+    db: State<'_, Database>,
+) -> Result<(), AppError> {
+    db.clear_history()
+}

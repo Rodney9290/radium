@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Card } from '../shared/Card';
 import { ProgressBar } from '../shared/ProgressBar';
+import { OnboardingTip } from '../onboarding/OnboardingTip';
 import type { BlankType, CardType } from '../../machines/types';
 
 interface WriteStepProps {
@@ -67,6 +68,9 @@ export function WriteStep({
 
   return (
     <Card title="Writing" style={{ maxWidth: '420px', width: '100%' }}>
+      <OnboardingTip tipId="write">
+        Keep the blank card steady on the reader during writing. Don't remove it until the process completes.
+      </OnboardingTip>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
         {cardType && (
           <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>

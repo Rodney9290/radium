@@ -4,7 +4,7 @@ use tauri::AppHandle;
 
 use crate::error::AppError;
 use crate::pm3::capabilities::DeviceCapabilities;
-use crate::pm3::connection::emit_output;
+use crate::pm3::connection::{emit_device_status, emit_output};
 use crate::pm3::device_finder;
 use crate::pm3::transport::Pm3Transport;
 use crate::pm3::transport_cli::CliTransportBatch;
@@ -34,6 +34,9 @@ pub struct Pm3Session {
     capabilities: RwLock<DeviceCapabilities>,
     /// Active port (if connected).
     port: RwLock<Option<String>>,
+    /// Last known port — persists across disconnect for fast reconnect.
+    /// NOT cleared on disconnect so reconnect() can try it first.
+    last_port: Mutex<Option<String>>,
     /// Dump file path from HF operations (autopwn, dump).
     dump_path: Mutex<Option<String>>,
 }
@@ -47,6 +50,7 @@ impl Pm3Session {
             app,
             capabilities: RwLock::new(DeviceCapabilities::default()),
             port: RwLock::new(None),
+            last_port: Mutex::new(None),
             dump_path: Mutex::new(None),
         }
     }
@@ -57,16 +61,20 @@ impl Pm3Session {
 
     /// Scan for a PM3 device and establish a session.
     ///
-    /// 1. Uses device_finder to probe serial ports
-    /// 2. Creates a transport to the discovered port
-    /// 3. Parses capabilities from discovery output
-    /// 4. Returns the capabilities
+    /// Uses device_finder with hint port (last known) for faster discovery.
     pub async fn connect(&self) -> Result<DeviceCapabilities, AppError> {
         // Disconnect any existing session first
         let _ = self.disconnect().await;
 
-        // Discover device (uses batch probe)
-        let device = device_finder::find_device(&self.app).await?;
+        // Get last known port for hint-based fast discovery
+        let hint = self.last_port.lock().ok().and_then(|p| p.clone());
+
+        // Discover device (parallel probing with hint)
+        let device = device_finder::find_device_with_hint(
+            &self.app,
+            hint.as_deref(),
+        )
+        .await?;
 
         // Try interactive transport first, fall back to batch
         let transport: Arc<dyn Pm3Transport> =
@@ -90,49 +98,23 @@ impl Pm3Session {
             &device.hw_version_output,
         );
 
-        self.store_session(transport, &device.port, caps.clone()).await?;
+        self.store_session(transport, &device.port, caps.clone())
+            .await?;
+
+        emit_device_status(&self.app, "connected", Some(&device.port), None);
         Ok(caps)
     }
 
-    /// Connect to a specific port (used when port is already known).
-    pub async fn connect_to_port(&self, port: &str) -> Result<DeviceCapabilities, AppError> {
-        let _ = self.disconnect().await;
-
-        // Try interactive transport first, fall back to batch
-        let transport: Arc<dyn Pm3Transport> =
-            match self.try_interactive(port).await {
-                Ok(t) => t,
-                Err(_) => Arc::new(CliTransportBatch::new(
-                    self.app.clone(),
-                    port.to_string(),
-                )),
-            };
-
-        // Run hw version to get capabilities
-        let output = transport.send("hw version").await?;
-        let info = parse_detailed_hw_version(&output);
-
-        let firmware = if !info.os_version.is_empty() {
-            info.os_version.clone()
-        } else {
-            info.client_version.clone()
-        };
-
-        let caps = DeviceCapabilities::from_hw_version(
-            port.to_string(),
-            info.model,
-            info.client_version,
-            firmware,
-            info.versions_match,
-            info.hardware_variant,
-            &output,
-        );
-
-        self.store_session(transport, port, caps.clone()).await?;
-        Ok(caps)
+    /// Reconnect using last known port for fast recovery.
+    ///
+    /// Tries the last known port first (fast path), then falls back to
+    /// full device discovery if that fails.
+    pub async fn reconnect(&self) -> Result<DeviceCapabilities, AppError> {
+        self.connect().await
     }
 
     /// Disconnect the current session.
+    /// Note: last_port is preserved for future reconnect.
     pub async fn disconnect(&self) -> Result<(), AppError> {
         let transport = {
             let mut t = self.transport.lock().await;
@@ -157,6 +139,7 @@ impl Pm3Session {
             *d = None;
         }
 
+        emit_device_status(&self.app, "disconnected", None, None);
         Ok(())
     }
 
@@ -193,11 +176,46 @@ impl Pm3Session {
         if let Ok(mut p) = self.port.write() {
             *p = Some(port.to_string());
         }
+        // Cache last known port for reconnect
+        if let Ok(mut lp) = self.last_port.lock() {
+            *lp = Some(port.to_string());
+        }
         // Set capabilities
         if let Ok(mut c) = self.capabilities.write() {
             *c = caps;
         }
         Ok(())
+    }
+
+    /// Check if a transport exists and is alive. If dead, try to reconnect.
+    /// Returns true if a healthy transport is available after the check.
+    async fn ensure_healthy_transport(&self) -> bool {
+        let is_alive = {
+            let guard = self.transport.lock().await;
+            match guard.as_ref() {
+                Some(t) => t.is_alive().await,
+                None => false,
+            }
+        };
+
+        if !is_alive && self.last_port.lock().ok().and_then(|p| p.clone()).is_some() {
+            emit_output(&self.app, "[=] Transport died, attempting reconnect...", false);
+            emit_device_status(&self.app, "reconnecting", None, None);
+
+            match self.reconnect().await {
+                Ok(_) => {
+                    emit_output(&self.app, "[+] Reconnected successfully", false);
+                    emit_device_status(&self.app, "reconnected", None, None);
+                    true
+                }
+                Err(_) => {
+                    emit_output(&self.app, "[!!] Reconnect failed", true);
+                    false
+                }
+            }
+        } else {
+            is_alive
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -206,10 +224,13 @@ impl Pm3Session {
 
     /// Run a command through the session with event emission.
     ///
+    /// If the transport is dead, attempts transparent reconnect before failing.
     /// The tokio::sync::Mutex on transport ensures only one command runs
-    /// at a time (serialization). This prevents race conditions from
-    /// concurrent Tauri command invocations.
+    /// at a time (serialization).
     pub async fn run_command(&self, cmd: &str) -> Result<String, AppError> {
+        // Health check: if transport is dead, try reconnecting before acquiring lock
+        self.ensure_healthy_transport().await;
+
         let transport_guard = self.transport.lock().await;
 
         let transport = transport_guard.as_ref().ok_or_else(|| {
@@ -232,6 +253,8 @@ impl Pm3Session {
 
     /// Run a streaming command with per-line callback.
     /// Used for long-running operations like autopwn (up to 1 hour timeout).
+    ///
+    /// If the transport is dead, attempts transparent reconnect before starting.
     pub async fn run_command_streaming<F>(
         &self,
         cmd: &str,
@@ -241,6 +264,9 @@ impl Pm3Session {
     where
         F: FnMut(&str) + Send + 'static,
     {
+        // Health check before long-running operation
+        self.ensure_healthy_transport().await;
+
         let transport_guard = self.transport.lock().await;
 
         let transport = transport_guard.as_ref().ok_or_else(|| {
@@ -294,11 +320,6 @@ impl Pm3Session {
             Ok(c) => c.is_some(),
             Err(_) => false,
         }
-    }
-
-    /// Get the active port.
-    pub fn get_port(&self) -> Option<String> {
-        self.port.read().ok().and_then(|p| p.clone())
     }
 
     /// Get cached device capabilities.

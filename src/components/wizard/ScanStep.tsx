@@ -3,6 +3,8 @@ import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { Badge } from '../shared/Badge';
 import { InlineNotice } from '../shared/InlineNotice';
+import { Spinner } from '../shared/Spinner';
+import { OnboardingTip } from '../onboarding/OnboardingTip';
 import type { CardData, CardType, Frequency } from '../../machines/types';
 
 interface ScanStepProps {
@@ -222,6 +224,9 @@ export function ScanStep({
   // Scanning or waiting to scan
   return (
     <Card style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+      <OnboardingTip tipId="scan">
+        Place your original card flat on the Proxmark3 antenna. Reading is completely non-destructive — your card won't be modified.
+      </OnboardingTip>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)' }}>
         {/* Device info */}
         <div style={{
@@ -247,13 +252,10 @@ export function ScanStep({
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: '32px',
+          ...(isLoading ? { animation: 'subtlePulse 2s ease-in-out infinite' } : {}),
         }}>
-          {isLoading ? (
-            <span style={{ animation: 'spin 1.5s linear infinite' }}>
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-              &#x21BB;
-            </span>
-          ) : '📡'}
+          {isLoading && <style>{`@keyframes subtlePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }`}</style>}
+          {isLoading ? <Spinner size={32} /> : '📡'}
         </div>
 
         <div>
