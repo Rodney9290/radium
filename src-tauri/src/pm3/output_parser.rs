@@ -443,8 +443,14 @@ pub fn parse_lf_search(output: &str) -> Option<(CardType, CardData)> {
         return parse_hid(&clean);
     }
 
-    // Indala
-    if clean.contains("Indala") {
+    // Indala — but skip if PM3 flagged it as a likely false positive.
+    // PM3 emits "Odd size, false positive?" when the demodulated length
+    // doesn't match any known Indala format.  Ghost Indala matches on
+    // empty readers or HF-only cards are a known issue.
+    if clean.contains("Indala")
+        && !clean.contains("false positive")
+        && !clean.contains("Odd size")
+    {
         let raw_hex = INDALA_RAW_RE
             .captures(&clean)
             .or_else(|| STANDALONE_RAW_RE.captures(&clean))
@@ -2100,6 +2106,21 @@ mod tests {
         let (_, data) = parse_lf_search(&output).unwrap();
         let cmd = build_clone_command(&CardType::Indala, &data.uid, &data.decoded);
         assert_eq!(cmd.unwrap(), "lf indala clone --raw A0000000A0000000");
+    }
+
+    #[test]
+    fn indala_false_positive_rejected() {
+        // PM3 flags ghost Indala matches with "Odd size, false positive?"
+        // These should be skipped so the scan falls through to HF.
+        let output = pm3_lf_search_output(
+            "[=] Odd size,  false positive?\n\
+             [+] Indala (len 214)  Raw: 7fffffffffffeff7deffffbfffffbfffffd7fbbffff7ffff3bffe5ff\n\
+             [+] Valid Indala ID found!"
+        );
+        assert!(
+            parse_lf_search(&output).is_none(),
+            "Ghost Indala with 'Odd size, false positive?' should be rejected"
+        );
     }
 
     // =======================================================================
