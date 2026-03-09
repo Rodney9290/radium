@@ -9,6 +9,7 @@ use crate::pm3::device_finder;
 use crate::pm3::transport::Pm3Transport;
 use crate::pm3::transport_cli::CliTransportBatch;
 use crate::pm3::transport_interactive::CliTransportInteractive;
+use crate::pm3::transport_mock::MockTransport;
 use crate::pm3::types::OutputLine;
 use crate::pm3::version::parse_detailed_hw_version;
 
@@ -59,10 +60,41 @@ impl Pm3Session {
     // Connection management
     // -----------------------------------------------------------------------
 
+    /// Connect using a mock transport (no real hardware needed).
+    ///
+    /// `scenario` controls which card type `lf search` / `hf search` returns.
+    /// Supported values: em4100 | hid | indala | mifare1k | mifare4k |
+    ///                   ultralight | ntag | desfire | iclass
+    pub async fn connect_mock(&self, scenario: &str) -> Result<DeviceCapabilities, AppError> {
+        let _ = self.disconnect().await;
+
+        let transport: Arc<dyn Pm3Transport> = Arc::new(MockTransport::new(scenario));
+
+        let caps = DeviceCapabilities::from_hw_version(
+            "mock".to_string(),
+            "Proxmark3 RFID instrument (mock)".to_string(),
+            "Iceman/master/v4.20728-234-g1a2b3c4d5".to_string(),
+            "Iceman/master/v4.20728-234-g1a2b3c4d5".to_string(),
+            true,
+            "generic".to_string(),
+            "",
+        );
+
+        self.store_session(transport, "mock", caps.clone()).await?;
+        emit_device_status(&self.app, "connected", Some("mock"), None);
+        Ok(caps)
+    }
+
     /// Scan for a PM3 device and establish a session.
     ///
     /// Uses device_finder with hint port (last known) for faster discovery.
     pub async fn connect(&self) -> Result<DeviceCapabilities, AppError> {
+        // Auto-mock mode: if PM3_MOCK is set, skip real device discovery
+        if std::env::var("PM3_MOCK").is_ok() {
+            let scenario = std::env::var("PM3_MOCK_CARD")
+                .unwrap_or_else(|_| "em4100".to_string());
+            return self.connect_mock(&scenario).await;
+        }
         // Disconnect any existing session first
         let _ = self.disconnect().await;
 

@@ -29,13 +29,13 @@ pub async fn hf_autopwn(
     machine: State<'_, Mutex<WizardMachine>>,
     session: State<'_, Pm3Session>,
 ) -> Result<WizardState, AppError> {
-    // Extract card_type from current state, then transition to HfProcessing
-    let card_type = {
+    // Extract card_type and card_data from current state, then transition to HfProcessing
+    let (card_type, card_prng, card_mfr) = {
         let mut m = machine.lock().map_err(|e| {
             AppError::CommandFailed(format!("State lock poisoned: {}", e))
         })?;
-        let card_type = match &m.current {
-            WizardState::CardIdentified { card_type, .. } => {
+        let (card_type, prng, mfr) = match &m.current {
+            WizardState::CardIdentified { card_type, card_data, .. } => {
                 match card_type {
                     CardType::MifareClassic1K | CardType::MifareClassic4K => {}
                     _ => {
@@ -45,7 +45,9 @@ pub async fn hf_autopwn(
                         )));
                     }
                 }
-                card_type.clone()
+                let prng = card_data.decoded.get("prng").cloned().unwrap_or_default();
+                let mfr = card_data.decoded.get("manufacturer").cloned().unwrap_or_default();
+                (card_type.clone(), prng, mfr)
             }
             _ => {
                 return Err(AppError::InvalidTransition(
@@ -54,7 +56,7 @@ pub async fn hf_autopwn(
             }
         };
         m.transition(WizardAction::StartHfProcess)?;
-        card_type
+        (card_type, prng, mfr)
     };
 
     let cmd = command_builder::build_hf_autopwn(&card_type);
@@ -75,6 +77,27 @@ pub async fn hf_autopwn(
         CardType::MifareClassic4K => 80,
         _ => 32,
     };
+
+    // FM11RF08S hardware backdoor pre-check (Quarkslab Aug 2024).
+    // Try the universal backdoor key before running full autopwn.
+    // On real hardware, iceman's autopwn already does this; this pre-step
+    // emits a dedicated phase event so the UI can display it.
+    let is_static_prng = card_prng.eq_ignore_ascii_case("STATIC");
+    let is_fudan = card_mfr.to_lowercase().contains("fudan")
+        || card_mfr.to_lowercase().contains("fm11rf08");
+    if is_static_prng || is_fudan {
+        let _ = app.emit(
+            "hf-progress",
+            HfProgressPayload {
+                phase: "BackdoorCheck".to_string(),
+                keys_found: 0,
+                keys_total: initial_keys_total,
+                elapsed_secs: 0,
+            },
+        );
+        // Non-fatal — autopwn handles all attacks regardless of result
+        let _ = session.run_command(command_builder::build_hf_mf_backdoor_chk()).await;
+    }
 
     let progress = Arc::new(Mutex::new(ProgressState {
         phase: ProcessPhase::KeyCheck,
@@ -217,6 +240,35 @@ pub async fn cancel_hf_operation(
     session: State<'_, Pm3Session>,
 ) -> Result<(), AppError> {
     session.cancel_current()
+}
+
+/// Reveal the HF dump file in the system file manager (Finder on macOS, Explorer on Windows).
+/// Uses the dump path stored by hf_autopwn or hf_dump.
+#[tauri::command]
+pub async fn reveal_dump_file(
+    session: State<'_, Pm3Session>,
+    app: AppHandle,
+) -> Result<(), AppError> {
+    let path = session.get_dump_path().ok_or_else(|| {
+        AppError::CommandFailed("No dump file available. Run key recovery first.".to_string())
+    })?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| AppError::CommandFailed(format!("Failed to reveal dump file: {}", e)))?;
+    Ok(())
+}
+
+/// Erase all sectors of a MIFARE Classic card back to factory defaults.
+/// Requires the card's sector keys to be known (works best on fresh magic cards).
+/// Returns PM3 command output.
+#[tauri::command]
+pub async fn hf_erase_card(
+    session: State<'_, Pm3Session>,
+) -> Result<String, AppError> {
+    let cmd = command_builder::build_hf_mf_erase();
+    let output = session.run_command(cmd).await?;
+    Ok(output)
 }
 
 // ---------------------------------------------------------------------------

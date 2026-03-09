@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { useSfx } from '../../hooks/useSfx';
+import { useNotifications } from '../../hooks/useNotifications';
 import type { CardType, CardData } from '../../machines/types';
 
 interface CompleteStepProps {
@@ -14,10 +15,12 @@ interface CompleteStepProps {
 
 export function CompleteStep({ onReset, onDisconnect, cardType, cardData, timestamp }: CompleteStepProps) {
   const sfx = useSfx();
+  const { notify } = useNotifications();
 
-  // Play success sound on mount
+  // Play success sound and fire notification on mount
   useEffect(() => {
     sfx.action();
+    notify('Clone Complete', `${cardType ?? 'Card'} cloned successfully`);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const displayType = cardType || 'Unknown';

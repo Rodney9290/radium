@@ -8,5 +8,6 @@ pub mod session;
 pub mod transport;
 pub mod transport_cli;
 pub mod transport_interactive;
+pub mod transport_mock;
 pub mod types;
 pub mod version;

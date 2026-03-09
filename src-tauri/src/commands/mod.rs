@@ -1,4 +1,5 @@
 pub mod blank;
+pub mod mock;
 pub mod device;
 pub mod erase;
 pub mod firmware;
@@ -8,5 +9,6 @@ pub mod permissions;
 pub mod raw;
 pub mod saved;
 pub mod scan;
+pub mod tune;
 pub mod wizard;
 pub mod write;

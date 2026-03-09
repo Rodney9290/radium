@@ -18,3 +18,12 @@ pub fn get_saved_cards(db: State<'_, Database>) -> Result<Vec<SavedCard>, AppErr
 pub fn delete_saved_card(db: State<'_, Database>, id: i64) -> Result<(), AppError> {
     db.delete_saved_card(id)
 }
+
+#[tauri::command]
+pub fn update_card_notes(
+    db: State<'_, Database>,
+    id: i64,
+    notes: Option<String>,
+) -> Result<(), AppError> {
+    db.update_card_notes(id, notes)
+}

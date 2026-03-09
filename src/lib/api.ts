@@ -14,6 +14,7 @@ export interface SavedCard {
   cloneable: boolean;
   recommendedBlank: string;
   createdAt: string;
+  notes: string | null;
 }
 
 /**
@@ -22,6 +23,15 @@ export interface SavedCard {
  */
 export async function detectDevice(): Promise<WizardState> {
   return invoke<WizardState>('detect_device');
+}
+
+/**
+ * Connect a simulated PM3 device for testing without hardware.
+ * scenario: 'em4100' | 'hid' | 'indala' | 'mifare1k' | 'mifare4k' |
+ *           'ultralight' | 'ntag' | 'desfire' | 'iclass'
+ */
+export async function connectMockDevice(scenario: string = 'em4100'): Promise<WizardState> {
+  return invoke<WizardState>('connect_mock_device', { scenario });
 }
 
 /**
@@ -255,6 +265,23 @@ export async function cancelHfOperation(): Promise<void> {
   return invoke<void>('cancel_hf_operation');
 }
 
+/**
+ * Reveal the HF dump file in the system file manager (Finder/Explorer).
+ * Opens the containing folder with the dump file selected.
+ */
+export async function revealDumpFile(): Promise<void> {
+  return invoke<void>('reveal_dump_file');
+}
+
+/**
+ * Erase all sectors of a MIFARE Classic card back to factory defaults.
+ * Resets all keys to FFFFFFFFFFFF and data to 0x00.
+ * Returns raw PM3 output.
+ */
+export async function hfEraseCard(): Promise<string> {
+  return invoke<string>('hf_erase_card');
+}
+
 // -- Saved Cards -------------------------------------------------------
 
 /**
@@ -271,6 +298,7 @@ export async function saveCard(card: {
   cloneable: boolean;
   recommendedBlank: string;
   createdAt: string;
+  notes?: string | null;
 }): Promise<number> {
   return invoke<number>('save_card', { card });
 }
@@ -288,6 +316,14 @@ export async function getSavedCards(): Promise<SavedCard[]> {
  */
 export async function deleteSavedCard(id: number): Promise<void> {
   return invoke<void>('delete_saved_card', { id });
+}
+
+/**
+ * Update the notes for a saved card.
+ * Pass null to clear notes.
+ */
+export async function updateCardNotes(id: number, notes: string | null): Promise<void> {
+  return invoke<void>('update_card_notes', { id, notes });
 }
 
 // -- Permissions (Linux) -----------------------------------------------
@@ -309,6 +345,24 @@ export interface PermissionCheck {
  */
 export async function checkDevicePermissions(devicePath?: string): Promise<PermissionCheck> {
   return invoke<PermissionCheck>('check_device_permissions', { devicePath });
+}
+
+// -- Antenna Diagnostics -----------------------------------------------
+
+export interface AntennaResult {
+  lfVoltageMv: number | null;
+  hfVoltageMv: number | null;
+  lfOk: boolean;
+  hfOk: boolean;
+  rawOutput: string;
+}
+
+/**
+ * Run `hw tune` to measure LF and HF antenna signal strength.
+ * Device must be connected.
+ */
+export async function hwTune(): Promise<AntennaResult> {
+  return invoke<AntennaResult>('hw_tune');
 }
 
 // -- Raw PM3 Command ---------------------------------------------------

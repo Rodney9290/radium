@@ -46,6 +46,12 @@ impl Database {
             );",
         )?;
 
+        // Migration: add notes column to saved_cards if it doesn't exist yet
+        let _ = conn.execute(
+            "ALTER TABLE saved_cards ADD COLUMN notes TEXT",
+            [],
+        );
+
         Ok(Database {
             conn: Mutex::new(conn),
         })

@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { InlineNotice } from '../shared/InlineNotice';
+import { useNotifications } from '../../hooks/useNotifications';
 import type { BlankType } from '../../machines/types';
 
 interface HfDumpReadyStepProps {
@@ -20,6 +22,49 @@ export function HfDumpReadyStep({
   onBack,
   recommendedBlank,
 }: HfDumpReadyStepProps) {
+  const { notify } = useNotifications();
+  const [revealStatus, setRevealStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [eraseStatus, setEraseStatus] = useState<'idle' | 'confirming' | 'loading' | 'done' | 'error'>('idle');
+  const [eraseMsg, setEraseMsg] = useState('');
+
+  useEffect(() => {
+    notify('Dump Ready', `${keysFound}/${keysTotal} keys recovered — ready to write`);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleReveal = async () => {
+    setRevealStatus('loading');
+    try {
+      const { revealDumpFile } = await import('../../lib/api');
+      await revealDumpFile();
+      setRevealStatus('idle');
+    } catch {
+      setRevealStatus('error');
+      setTimeout(() => setRevealStatus('idle'), 3000);
+    }
+  };
+
+  const handleErase = async () => {
+    if (eraseStatus === 'confirming') {
+      setEraseStatus('loading');
+      try {
+        const { hfEraseCard } = await import('../../lib/api');
+        await hfEraseCard();
+        setEraseStatus('done');
+        setEraseMsg('Card erased to factory defaults.');
+        setTimeout(() => setEraseStatus('idle'), 4000);
+      } catch (e) {
+        setEraseStatus('error');
+        setEraseMsg(e instanceof Error ? e.message : 'Erase failed.');
+        setTimeout(() => setEraseStatus('idle'), 4000);
+      }
+    } else {
+      setEraseStatus('confirming');
+      setTimeout(() => {
+        setEraseStatus(s => s === 'confirming' ? 'idle' : s);
+      }, 5000);
+    }
+  };
+
   return (
     <Card title="Dump Ready" style={{ maxWidth: '440px', width: '100%' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
@@ -69,14 +114,41 @@ export function HfDumpReadyStep({
           <div>2. Place the blank magic card you want to write to</div>
         </InlineNotice>
 
+        {/* Erase feedback */}
+        {(eraseStatus === 'done' || eraseStatus === 'error') && eraseMsg && (
+          <InlineNotice variant={eraseStatus === 'done' ? 'success' : 'error'}>
+            {eraseMsg}
+          </InlineNotice>
+        )}
+        {revealStatus === 'error' && (
+          <InlineNotice variant="error">Could not open file manager.</InlineNotice>
+        )}
+
         {/* Actions */}
         <div style={{
           display: 'flex',
           gap: 'var(--space-2)',
+          flexWrap: 'wrap',
           paddingTop: 'var(--space-1)',
         }}>
           <Button variant="secondary" size="sm" onClick={onBack}>
             Back
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleReveal}
+            loading={revealStatus === 'loading'}
+          >
+            Show in Finder
+          </Button>
+          <Button
+            variant={eraseStatus === 'confirming' ? 'destructive' : 'ghost'}
+            size="sm"
+            onClick={handleErase}
+            loading={eraseStatus === 'loading'}
+          >
+            {eraseStatus === 'confirming' ? 'Confirm Erase' : 'Erase Card'}
           </Button>
           <Button
             variant="primary"

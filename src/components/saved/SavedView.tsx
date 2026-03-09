@@ -3,7 +3,7 @@ import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { Badge } from '../shared/Badge';
 import { InlineNotice } from '../shared/InlineNotice';
-import { getSavedCards, deleteSavedCard, saveCard, type SavedCard } from '../../lib/api';
+import { getSavedCards, deleteSavedCard, saveCard, updateCardNotes, type SavedCard } from '../../lib/api';
 import { useWizard } from '../../hooks/useWizard';
 
 function formatLocalTime(isoStr: string): string {
@@ -93,6 +93,9 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
+  const [notesMap, setNotesMap] = useState<Record<number, string>>({});
+  const [notesSaving, setNotesSaving] = useState<Record<number, boolean>>({});
+  const [notesError, setNotesError] = useState<Record<number, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wizard = useWizard();
 
@@ -145,6 +148,7 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
           cloneable: card.cloneable ?? false,
           recommendedBlank: card.recommendedBlank ?? 'T5577',
           createdAt: card.createdAt ?? new Date().toISOString(),
+          notes: card.notes ?? null,
         });
       }
       refresh();
@@ -161,7 +165,14 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
     const start = Date.now();
     getSavedCards()
       .then((data) => {
-        if (!cancelled) setCards(data);
+        if (!cancelled) {
+          setCards(data);
+          const map: Record<number, string> = {};
+          for (const c of data) {
+            if (c.id !== null) map[c.id] = c.notes ?? '';
+          }
+          setNotesMap(map);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -188,6 +199,23 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
         : typeof err === 'object' && err !== null ? (Object.values(err)[0] as string) ?? String(err)
         : String(err);
       setError(msg);
+    }
+  };
+
+  const handleSaveNotes = async (id: number) => {
+    setNotesSaving(prev => ({ ...prev, [id]: true }));
+    setNotesError(prev => ({ ...prev, [id]: '' }));
+    try {
+      const text = notesMap[id] ?? '';
+      await updateCardNotes(id, text.trim() === '' ? null : text.trim());
+      setCards(prev => prev.map(c => c.id === id ? { ...c, notes: text.trim() === '' ? null : text.trim() } : c));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message
+        : typeof err === 'object' && err !== null ? (Object.values(err)[0] as string) ?? 'Failed to save notes'
+        : 'Failed to save notes';
+      setNotesError(prev => ({ ...prev, [id]: msg }));
+    } finally {
+      setNotesSaving(prev => ({ ...prev, [id]: false }));
     }
   };
 
@@ -498,6 +526,55 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
                     ));
                   })()}
 
+                  {/* Notes */}
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <div style={{
+                      fontSize: '13px',
+                      color: 'var(--text-tertiary)',
+                      fontFamily: 'var(--font-sans)',
+                      marginBottom: 'var(--space-2)',
+                    }}>
+                      Notes
+                    </div>
+                    <textarea
+                      rows={3}
+                      placeholder="Add notes about this card..."
+                      value={expanded.id !== null ? (notesMap[expanded.id] ?? '') : ''}
+                      onChange={(e) => {
+                        if (expanded.id !== null) {
+                          setNotesMap(prev => ({ ...prev, [expanded.id!]: e.target.value }));
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: 'var(--space-2) var(--space-3)',
+                        fontSize: '13px',
+                        fontFamily: 'var(--font-sans)',
+                        background: 'var(--bg-primary)',
+                        border: '1px solid var(--border-secondary)',
+                        borderRadius: 'var(--radius-md)',
+                        color: 'var(--text-primary)',
+                        resize: 'vertical',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-secondary)'; }}
+                    />
+                  </div>
+
+                  {/* Notes save error */}
+                  {expanded.id !== null && notesError[expanded.id] && (
+                    <p style={{
+                      fontSize: '12px',
+                      color: 'var(--color-error, #ef4444)',
+                      fontFamily: 'var(--font-sans)',
+                      margin: 'var(--space-2) 0 0 0',
+                    }}>
+                      {notesError[expanded.id]}
+                    </p>
+                  )}
+
                   {/* Action buttons */}
                   <div style={{
                     marginTop: 'var(--space-3)',
@@ -510,6 +587,14 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
                       onClick={() => handleClone(expanded)}
                     >
                       Clone This
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={expanded.id === null || notesSaving[expanded.id ?? -1]}
+                      onClick={() => { if (expanded.id !== null) handleSaveNotes(expanded.id); }}
+                    >
+                      {expanded.id !== null && notesSaving[expanded.id] ? 'Saving…' : 'Save Notes'}
                     </Button>
                     <Button
                       variant="destructive"

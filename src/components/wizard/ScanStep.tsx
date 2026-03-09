@@ -45,8 +45,26 @@ export function ScanStep({
   if (cardData && cardType) {
     const freqLabel = frequency === 'LF' ? '125 kHz (LF)' : frequency === 'HF' ? '13.56 MHz (HF)' : 'Unknown';
     const decodedEntries = cardData.decoded
-      ? Object.entries(cardData.decoded).filter(([key]) => key !== 'type' && key !== 'uid')
+      ? Object.entries(cardData.decoded).filter(([key]) => key !== 'type' && key !== 'uid' && key !== 'prng')
       : [];
+
+    // Attack plan for MIFARE Classic HF cards
+    const isMifareClassic = cardType === 'MifareClassic1K' || cardType === 'MifareClassic4K';
+    const attackPlan = frequency === 'HF' && isMifareClassic ? (() => {
+      const prng = (cardData.decoded?.prng ?? '').toUpperCase();
+      const mfr = (cardData.decoded?.manufacturer ?? '').toLowerCase();
+      const isFudan = mfr.includes('fudan') || mfr.includes('fm11rf08');
+
+      if (isFudan) {
+        return { prngLabel: 'BACKDOOR', color: 'var(--success)', method: 'FM11RF08S hardware backdoor', time: '< 1 second', blank: 'Magic MIFARE Gen1a' };
+      } else if (prng === 'HARDENED') {
+        return { prngLabel: 'HARDENED', color: '#f59e0b', method: 'Hardnested (SIMD solver)', time: '30–60 minutes', blank: 'Magic MIFARE Gen1a or Gen2' };
+      } else if (prng === 'STATIC') {
+        return { prngLabel: 'STATIC', color: '#60a5fa', method: 'Staticnested', time: '~5 minutes', blank: 'Magic MIFARE Gen1a' };
+      } else {
+        return { prngLabel: prng || 'WEAK', color: 'var(--success)', method: 'Nested (standard)', time: '~30 seconds', blank: 'Magic MIFARE Gen1a' };
+      }
+    })() : null;
 
     const handleSave = async () => {
       if (!saveName.trim() || !onSave) return;
@@ -75,6 +93,39 @@ export function ScanStep({
                 label={freqLabel}
               />
             </div>
+
+            {/* Attack plan panel for MIFARE Classic */}
+            {attackPlan && (
+              <div style={{
+                background: 'var(--bg-secondary)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3) var(--space-4)',
+                border: `1px solid ${attackPlan.color}28`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Attack Plan
+                  </span>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '2px 7px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: `${attackPlan.color}1a`,
+                    color: attackPlan.color,
+                    fontFamily: 'var(--font-mono)',
+                    letterSpacing: '0.04em',
+                  }}>
+                    PRNG: {attackPlan.prngLabel}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <AttackRow label="Method" value={attackPlan.method} />
+                  <AttackRow label="Est. time" value={attackPlan.time} mono />
+                  <AttackRow label="Buy blank" value={attackPlan.blank} />
+                </div>
+              </div>
+            )}
 
             {/* Info rows */}
             <InfoRow label="Type" value={cardType} />
@@ -296,6 +347,23 @@ export function ScanStep({
         </div>
       </div>
     </Card>
+  );
+}
+
+/** Compact row for attack plan panel */
+function AttackRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 'var(--space-3)' }}>
+      <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', flexShrink: 0 }}>{label}</span>
+      <span style={{
+        fontSize: '12px',
+        color: 'var(--text-primary)',
+        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
+        textAlign: 'right',
+      }}>
+        {value}
+      </span>
+    </div>
   );
 }
 

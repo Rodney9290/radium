@@ -614,6 +614,10 @@ pub fn build_hf_iclass_info() -> &'static str {
     "hf iclass info"
 }
 
+pub fn build_hw_tune() -> &'static str {
+    "hw tune"
+}
+
 #[allow(dead_code)]
 pub fn build_hf_mfdes_info() -> &'static str {
     "hf mfdes info"
@@ -629,6 +633,33 @@ pub fn build_hf_autopwn(card_type: &CardType) -> String {
         CardType::MifareClassic4K => "hf mf autopwn --4k".to_string(),
         _ => "hf mf autopwn".to_string(),
     }
+}
+
+/// Check all sectors with the FM11RF08S hardware backdoor key (Quarkslab, Aug 2024).
+/// If this succeeds, the card can be dumped without prior knowledge of any sector key.
+pub fn build_hf_mf_backdoor_chk() -> &'static str {
+    "hf mf chk --ks -k A396EFA4E24F"
+}
+
+/// Hardnested attack: recover keys for a PRNG:HARDENED card using one known key.
+/// `blk`: a block we already have key access to (e.g., 0), `key`: 12 hex chars.
+#[allow(dead_code)]
+pub fn build_hf_mf_hardnested(blk: u8, key: &str) -> String {
+    format!("hf mf hardnested --blk {} --tblk 4 -k {} --tk FFFFFFFFFFFF", blk, key)
+}
+
+/// Staticnested attack: recover keys for a card with a static nonce PRNG.
+/// Collects nonces and solves offline — much faster than hardnested.
+#[allow(dead_code)]
+pub fn build_hf_mf_staticnested() -> &'static str {
+    "hf mf staticnested --collect"
+}
+
+/// Erase all sectors of a MIFARE Classic card using known keys.
+/// Writes factory-default data (all 0x00) and resets keys to FFFFFFFFFFFF.
+/// Only works on cards where all sector keys are already known (e.g. fresh magic cards).
+pub fn build_hf_mf_erase() -> &'static str {
+    "hf mf erase"
 }
 
 // ---------------------------------------------------------------------------

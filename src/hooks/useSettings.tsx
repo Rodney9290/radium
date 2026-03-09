@@ -8,6 +8,7 @@ export interface RadiumSettings {
   theme: 'system' | 'light' | 'dark';
   musicVolume: number;
   autoReconnect: boolean;
+  notifications: boolean;
 }
 
 const DEFAULT_SETTINGS: RadiumSettings = {
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: RadiumSettings = {
   theme: 'system',
   musicVolume: 30,
   autoReconnect: true,
+  notifications: false,
 };
 
 const STORAGE_KEY = 'radium-settings';

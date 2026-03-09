@@ -30,6 +30,7 @@ pub struct SavedCard {
     pub cloneable: bool,
     pub recommended_blank: String,
     pub created_at: String,
+    pub notes: Option<String>,
 }
 
 impl Database {
@@ -88,8 +89,8 @@ impl Database {
             AppError::DatabaseError(format!("Lock poisoned: {}", e))
         })?;
         conn.execute(
-            "INSERT INTO saved_cards (name, card_type, frequency, uid, raw, decoded, cloneable, recommended_blank, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO saved_cards (name, card_type, frequency, uid, raw, decoded, cloneable, recommended_blank, created_at, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 card.name,
                 card.card_type,
@@ -100,9 +101,21 @@ impl Database {
                 card.cloneable as i32,
                 card.recommended_blank,
                 card.created_at,
+                card.notes,
             ],
         )?;
         Ok(conn.last_insert_rowid())
+    }
+
+    pub fn update_card_notes(&self, id: i64, notes: Option<String>) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::DatabaseError(format!("Lock poisoned: {}", e))
+        })?;
+        conn.execute(
+            "UPDATE saved_cards SET notes = ?1 WHERE id = ?2",
+            params![notes, id],
+        )?;
+        Ok(())
     }
 
     pub fn get_saved_cards(&self) -> Result<Vec<SavedCard>, AppError> {
@@ -110,7 +123,7 @@ impl Database {
             AppError::DatabaseError(format!("Lock poisoned: {}", e))
         })?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, card_type, frequency, uid, raw, decoded, cloneable, recommended_blank, created_at
+            "SELECT id, name, card_type, frequency, uid, raw, decoded, cloneable, recommended_blank, created_at, notes
              FROM saved_cards ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -125,6 +138,7 @@ impl Database {
                 cloneable: row.get::<_, i32>(7)? != 0,
                 recommended_blank: row.get(8)?,
                 created_at: row.get(9)?,
+                notes: row.get(10)?,
             })
         })?;
 

@@ -52,13 +52,18 @@ pub fn run() {
             commands::saved::save_card,
             commands::saved::get_saved_cards,
             commands::saved::delete_saved_card,
+            commands::saved::update_card_notes,
             commands::raw::run_raw_command,
             commands::hf_clone::hf_autopwn,
             commands::hf_clone::hf_write_clone,
             commands::hf_clone::hf_dump,
             commands::hf_clone::hf_verify_clone,
             commands::hf_clone::cancel_hf_operation,
+            commands::hf_clone::reveal_dump_file,
+            commands::hf_clone::hf_erase_card,
             commands::permissions::check_device_permissions,
+            commands::mock::connect_mock_device,
+            commands::tune::hw_tune,
         ])
         .run(tauri::generate_context!())
         .expect("error running Radium");

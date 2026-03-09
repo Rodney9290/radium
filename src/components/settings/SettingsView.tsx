@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useSettings } from '../../hooks/useSettings';
 import { useMusic } from '../../hooks/useMusic';
+import { requestNotificationPermission } from '../../hooks/useNotifications';
+import { hwTune, type AntennaResult } from '../../lib/api';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
 import { Badge } from '../shared/Badge';
@@ -82,9 +85,67 @@ const SHORTCUTS = [
   { keys: 'Esc', action: 'Cancel / Reset' },
 ];
 
+function SignalBar({ voltage, max, ok }: { voltage: number | null; max: number; ok: boolean }) {
+  const pct = voltage !== null ? Math.min(100, (voltage / max) * 100) : 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flex: 1 }}>
+      <div style={{
+        flex: 1,
+        height: '8px',
+        background: 'var(--bg-tertiary)',
+        borderRadius: 'var(--radius-full)',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${pct}%`,
+          height: '100%',
+          background: ok ? 'var(--color-success, #22c55e)' : 'var(--color-warning, #f59e0b)',
+          borderRadius: 'var(--radius-full)',
+          transition: 'width 0.4s ease',
+        }} />
+      </div>
+      <span style={{
+        fontSize: '12px',
+        fontWeight: 600,
+        fontFamily: 'var(--font-mono)',
+        color: ok ? 'var(--color-success, #22c55e)' : 'var(--color-warning, #f59e0b)',
+        minWidth: '60px',
+        textAlign: 'right',
+      }}>
+        {voltage !== null ? `${(voltage / 1000).toFixed(1)} V` : '—'}
+      </span>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const { settings, updateSettings } = useSettings();
   const music = useMusic();
+  const [tuneResult, setTuneResult] = useState<AntennaResult | null>(null);
+  const [tuning, setTuning] = useState(false);
+  const [tuneError, setTuneError] = useState<string | null>(null);
+
+  const runTune = async () => {
+    setTuning(true);
+    setTuneError(null);
+    setTuneResult(null);
+    try {
+      const result = await hwTune();
+      setTuneResult(result);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message
+        : typeof err === 'object' && err !== null ? (Object.values(err)[0] as string) ?? String(err)
+        : String(err);
+      // Show friendly message for "not connected" errors
+      setTuneError(
+        raw.includes('Not connected') || raw.includes('connect')
+          ? 'Device not connected. Connect a PM3 device first.'
+          : 'Antenna test failed. Check device connection and try again.'
+      );
+    } finally {
+      setTuning(false);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -143,6 +204,19 @@ export function SettingsView() {
             description="Automatically detect device when plugged in"
             checked={settings.autoReconnect}
             onChange={() => updateSettings({ autoReconnect: !settings.autoReconnect })}
+          />
+          <ToggleRow
+            label="Notifications"
+            description="Show system notification when clone completes"
+            checked={settings.notifications}
+            onChange={async () => {
+              if (!settings.notifications) {
+                const granted = await requestNotificationPermission();
+                if (granted) updateSettings({ notifications: true });
+              } else {
+                updateSettings({ notifications: false });
+              }
+            }}
           />
         </div>
       </Card>
@@ -246,6 +320,42 @@ export function SettingsView() {
               </span>
             </div>
           ))}
+        </div>
+      </Card>
+
+      {/* Diagnostics */}
+      <Card title="Diagnostics">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)', margin: 0 }}>
+            Measure antenna signal strength to verify your PM3 hardware is working correctly.
+          </p>
+
+          {tuneResult && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-2) 0' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)', minWidth: '24px' }}>LF</span>
+                <SignalBar voltage={tuneResult.lfVoltageMv} max={60000} ok={tuneResult.lfOk} />
+                <Badge variant={tuneResult.lfOk ? 'success' : 'warning'} label={tuneResult.lfOk ? 'OK' : 'Weak'} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-2) 0' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)', minWidth: '24px' }}>HF</span>
+                <SignalBar voltage={tuneResult.hfVoltageMv} max={35000} ok={tuneResult.hfOk} />
+                <Badge variant={tuneResult.hfOk ? 'success' : 'warning'} label={tuneResult.hfOk ? 'OK' : 'Weak'} />
+              </div>
+            </div>
+          )}
+
+          {tuneError && (
+            <p style={{ fontSize: '13px', color: 'var(--color-error, #ef4444)', fontFamily: 'var(--font-sans)', margin: 0 }}>
+              {tuneError}
+            </p>
+          )}
+
+          <div>
+            <Button variant="secondary" size="sm" onClick={runTune} disabled={tuning}>
+              {tuning ? 'Measuring…' : 'Test Antenna'}
+            </Button>
+          </div>
         </div>
       </Card>
 
