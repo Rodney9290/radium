@@ -427,6 +427,18 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         cloneable: card.cloneable,
         recommendedBlank: card.recommendedBlank as WizCtx['recommendedBlank'] & string,
       });
+
+      // For HF cards with existing dumps, skip straight to blank detection
+      if (card.frequency === 'HF') {
+        const { checkDumpExists } = await import('../lib/api');
+        const dumpPath = await checkDumpExists(card.uid);
+        if (dumpPath) {
+          // Dump exists — skip autopwn, go directly to blank detection
+          await api.proceedToWrite(card.recommendedBlank as BlankType);
+          send({ type: 'SKIP_TO_BLANK', expectedBlank: card.recommendedBlank as BlankType });
+          return;
+        }
+      }
     } catch (err) {
       console.error('loadSavedCard: Rust LoadSavedCard failed, resetting', err);
       reset();

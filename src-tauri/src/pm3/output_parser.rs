@@ -1292,6 +1292,33 @@ pub fn is_iclass_present(output: &str) -> bool {
     lower.contains("iclass") || lower.contains("picopass")
 }
 
+/// Check if `hf iclass info` output indicates an iCLASS Elite (SE) card.
+/// Elite cards use diversified keys — the standard master key won't work.
+pub fn is_iclass_elite(output: &str) -> bool {
+    let clean = strip_ansi(output);
+    let lower = clean.to_lowercase();
+    lower.contains("elite") || lower.contains("se mode") || lower.contains("key diversified")
+}
+
+/// Extract the recovered key from `hf iclass loclass` output.
+/// Matches lines like "[+] Key ... : <hex key>" or "found key : <hex key>".
+pub fn parse_iclass_loclass_key(output: &str) -> Option<String> {
+    let clean = strip_ansi(output);
+    for line in clean.lines() {
+        let lower = line.to_lowercase();
+        if lower.contains("key") && (lower.contains("[+]") || lower.contains("found")) {
+            // Extract hex key (16 hex chars = 8 bytes)
+            if let Some(caps) = regex::Regex::new(r"(?i)(?:key|found)[^:]*:\s*([0-9A-Fa-f]{16})")
+                .ok()
+                .and_then(|re| re.captures(line))
+            {
+                return Some(caps[1].to_uppercase());
+            }
+        }
+    }
+    None
+}
+
 /// Extract dump file path from PM3 dump/autopwn output.
 /// Works with `hf mf autopwn`, `hf mfu dump`, `hf iclass dump`, etc.
 /// Matches patterns like "saved ... to file <path>" or "saved ... file <path>".

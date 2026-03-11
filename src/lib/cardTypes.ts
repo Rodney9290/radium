@@ -273,6 +273,12 @@ export const BLANK_DISPLAY: Record<BlankType, BlankDisplayInfo> = {
     description: 'Writable iCLASS compatible credential',
     compatibleWith: ['IClass'],
   },
+  RegularMifare: {
+    displayName: 'Regular MIFARE Classic',
+    frequency: 'HF',
+    description: 'Non-magic MIFARE Classic — writes data sectors only, UID unchanged',
+    compatibleWith: ['MifareClassic1K', 'MifareClassic4K'],
+  },
 };
 
 // Fields that each card type's decoded map may contain.

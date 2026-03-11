@@ -108,6 +108,18 @@ export function WizardContainer() {
         );
       case 'CardIdentified': {
         const isHf = wizard.context.frequency === 'HF';
+        const handleHfWrite = async () => {
+          // Check if a dump file already exists for this UID (skip autopwn)
+          const { checkDumpExists } = await import('../../lib/api');
+          const dumpPath = await checkDumpExists(wizard.context.cardData?.uid ?? '');
+          if (dumpPath) {
+            // Dump exists — skip autopwn, go straight to blank detection
+            wizard.skipToBlank(wizard.context.recommendedBlank!);
+          } else {
+            // No dump — need to run autopwn first
+            wizard.startHfProcess();
+          }
+        };
         return (
           <ScanStep
             device={{
@@ -121,7 +133,7 @@ export function WizardContainer() {
             cloneable={wizard.context.cloneable}
             skipSwapConfirm={isHf}
             onScanned={isHf
-              ? () => wizard.startHfProcess()
+              ? handleHfWrite
               : () => wizard.skipToBlank(wizard.context.recommendedBlank!)
             }
             onBack={wizard.backToScan}
@@ -258,7 +270,7 @@ export function WizardContainer() {
             recoverable={wizard.context.errorRecoverable}
             recoveryAction={wizard.context.errorRecoveryAction}
             errorSource={wizard.context.errorSource}
-            onRetry={wizard.reset}
+            onRetry={wizard.softReset}
             onReset={wizard.reset}
           />
         );

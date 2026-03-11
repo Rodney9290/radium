@@ -15,6 +15,10 @@ pub struct HwVersionInfo {
     /// "rdv4", "rdv4-bt", "generic", or "generic-256"
     pub hardware_variant: String,
     pub versions_match: bool,
+    /// LF protocol modules compiled into the firmware (e.g. "EM 4x05/4x69", "HID Prox")
+    pub compiled_with_lf: Vec<String>,
+    /// HF protocol modules compiled into the firmware (e.g. "ISO 14443A", "iCLASS")
+    pub compiled_with_hf: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -42,6 +46,14 @@ static OS_VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// Extracts commit hash from version string: `v4.20728-234-g1a2b3c4d5-dirty` → `1a2b3c4d5`
 static COMMIT_HASH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"-g([0-9a-fA-F]{7,})").expect("bad commit hash regex")
+});
+
+/// Extracts bare commit hash from version strings without `-g` prefix.
+/// Matches `Iceman/master/d5dc045-suspect` → `d5dc045`
+/// The hash appears after the last `/`, is 7+ hex chars, optionally followed by `-dirty`/`-suspect`.
+static BARE_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"/([0-9a-fA-F]{7,})(?:-(?:dirty|suspect))?(?:\s|$)")
+        .expect("bad bare commit regex")
 });
 
 /// Extracts base version: `v4.20728` from `Iceman/master/v4.20728-234-g...`
@@ -77,6 +89,7 @@ pub fn parse_detailed_hw_version(output: &str) -> HwVersionInfo {
         .unwrap_or_default();
     let hardware_variant = detect_hardware_variant(&clean);
     let versions_match = compare_versions(&client_version, &os_version);
+    let (compiled_with_lf, compiled_with_hf) = parse_compiled_modules(&clean);
 
     HwVersionInfo {
         model,
@@ -84,6 +97,8 @@ pub fn parse_detailed_hw_version(output: &str) -> HwVersionInfo {
         os_version,
         hardware_variant,
         versions_match,
+        compiled_with_lf,
+        compiled_with_hf,
     }
 }
 
@@ -165,10 +180,87 @@ pub fn detect_hardware_variant(output: &str) -> String {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Parse compiled-in protocol modules from `hw version` output.
+///
+/// The Iceman firmware v4 outputs a section like:
+/// ```text
+/// [ Compiled with support for ]
+///    LF: EM 4x05/4x69, HID Prox, Indala, ...
+///    HF: ISO 14443A, MIFARE Classic, iCLASS, ...
+/// ```
+/// Returns (lf_modules, hf_modules). Empty vecs if the section is not found
+/// (e.g. older firmware or firmware that doesn't report this).
+fn parse_compiled_modules(output: &str) -> (Vec<String>, Vec<String>) {
+    let mut lf_modules = Vec::new();
+    let mut hf_modules = Vec::new();
+
+    // Find the "Compiled with" section
+    let lower = output.to_lowercase();
+    let compiled_start = lower.find("compiled with");
+    if compiled_start.is_none() {
+        return (lf_modules, hf_modules);
+    }
+    let section = &output[compiled_start.unwrap()..];
+
+    // Collect all text after "LF:" until "HF:" or end of section
+    // Collect all text after "HF:" until next section header "[" or end
+    let section_lower = section.to_lowercase();
+
+    if let Some(lf_pos) = section_lower.find("\n") {
+        let after_header = &section[lf_pos..];
+        let after_lower = after_header.to_lowercase();
+
+        // Find LF: line(s) — may span multiple lines until HF: is found
+        if let Some(lf_start) = after_lower.find("lf:") {
+            let lf_text_start = lf_start + 3;
+            // LF section ends at HF: or a new section header [
+            let lf_end = after_lower[lf_text_start..]
+                .find("hf:")
+                .or_else(|| after_lower[lf_text_start..].find('['))
+                .map(|p| lf_text_start + p)
+                .unwrap_or(after_lower.len());
+            let lf_text = &after_header[lf_text_start..lf_end];
+            lf_modules = parse_module_list(lf_text);
+        }
+
+        // Find HF: line(s)
+        if let Some(hf_start) = after_lower.find("hf:") {
+            let hf_text_start = hf_start + 3;
+            // HF section ends at a new section header [ or end
+            let hf_end = after_lower[hf_text_start..]
+                .find('[')
+                .map(|p| hf_text_start + p)
+                .unwrap_or(after_lower.len());
+            let hf_text = &after_header[hf_text_start..hf_end];
+            hf_modules = parse_module_list(hf_text);
+        }
+    }
+
+    (lf_modules, hf_modules)
+}
+
+/// Parse a comma-separated module list, handling multi-line continuation.
+fn parse_module_list(text: &str) -> Vec<String> {
+    // Join lines, split by comma, trim whitespace
+    let joined = text.lines().collect::<Vec<_>>().join(" ");
+    joined
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 fn extract_commit_hash(version: &str) -> Option<String> {
+    // Try standard `-gHASH` format first
     COMMIT_HASH_RE
         .captures(version)
         .map(|c| c[1].to_lowercase())
+        // Fallback: bare hash after last `/` (e.g. `Iceman/master/d5dc045-suspect`)
+        .or_else(|| {
+            BARE_COMMIT_RE
+                .captures(version)
+                .map(|c| c[1].to_lowercase())
+        })
 }
 
 fn extract_base_version(version: &str) -> Option<String> {
@@ -376,5 +468,112 @@ OS......... Iceman/master/v4.20469-164-g0e95c62ad-suspect 2025-08-02 22:16:55 ef
         assert!(info.client_version.contains("v4.20728"), "client: {}", info.client_version);
         assert!(info.os_version.contains("v4.20469"), "os: {}", info.os_version);
         assert!(!info.versions_match, "should NOT match — different commits");
+    }
+
+    // -----------------------------------------------------------------------
+    // Compiled module parsing tests
+    // -----------------------------------------------------------------------
+
+    const SAMPLE_WITH_MODULES: &str = r#"
+[ Proxmark3 RFID instrument ]
+[ Client ]
+  client: Iceman/master/v4.20728-234-g1a2b3c4d5
+[ ARM ]
+  os: Iceman/master/v4.20728-234-g1a2b3c4d5
+[ Hardware ]
+  --= uC: AT91SAM7S512 Rev B
+[ Compiled with support for ]
+   LF: EM 4x05/4x69, HID Prox, Indala, AWID, IO Prox, FDX-B,
+       Paradox, Viking, T55xx
+   HF: ISO 14443A, ISO 14443B, MIFARE Classic, iCLASS
+"#;
+
+    #[test]
+    fn test_parse_compiled_modules_full() {
+        let info = parse_detailed_hw_version(SAMPLE_WITH_MODULES);
+        assert!(!info.compiled_with_lf.is_empty(), "should have LF modules");
+        assert!(!info.compiled_with_hf.is_empty(), "should have HF modules");
+
+        // Check specific LF modules
+        assert!(info.compiled_with_lf.iter().any(|m| m.contains("EM 4x05")));
+        assert!(info.compiled_with_lf.iter().any(|m| m.contains("HID Prox")));
+        assert!(info.compiled_with_lf.iter().any(|m| m.contains("T55xx")));
+
+        // Check specific HF modules
+        assert!(info.compiled_with_hf.iter().any(|m| m.contains("14443A")));
+        assert!(info.compiled_with_hf.iter().any(|m| m.contains("MIFARE Classic")));
+        assert!(info.compiled_with_hf.iter().any(|m| m.contains("iCLASS")));
+    }
+
+    const SAMPLE_256K_STRIPPED: &str = r#"
+[ Proxmark3 RFID instrument ]
+[ Client ]
+  client: Iceman/master/v4.20728
+[ ARM ]
+  os: Iceman/master/v4.20728
+[ Hardware ]
+  --= uC: AT91SAM7S256 Rev C
+[ Compiled with support for ]
+   LF: EM 4x05/4x69, HID Prox, T55xx
+   HF: ISO 14443A, MIFARE Classic
+"#;
+
+    #[test]
+    fn test_parse_compiled_modules_stripped_256k() {
+        let info = parse_detailed_hw_version(SAMPLE_256K_STRIPPED);
+        assert_eq!(info.hardware_variant, "generic-256");
+
+        // iCLASS should NOT be present (stripped for 256K)
+        assert!(!info.compiled_with_hf.iter().any(|m| m.to_lowercase().contains("iclass")),
+            "iCLASS should not be compiled in 256K firmware");
+
+        // DESFire should NOT be present
+        assert!(!info.compiled_with_hf.iter().any(|m| m.to_lowercase().contains("desfire")),
+            "DESFire should not be compiled in 256K firmware");
+
+        // But MIFARE Classic should be present
+        assert!(info.compiled_with_hf.iter().any(|m| m.contains("MIFARE Classic")));
+    }
+
+    #[test]
+    fn test_parse_no_compiled_section() {
+        // Older firmware without "Compiled with" section
+        let info = parse_detailed_hw_version(SAMPLE_HW_VERSION);
+        assert!(info.compiled_with_lf.is_empty(), "no modules expected for old format");
+        assert!(info.compiled_with_hf.is_empty(), "no modules expected for old format");
+    }
+
+    /// Bare commit hash format without `-g` prefix or `vX.XXXXX` version.
+    /// Real output: `Iceman/master/d5dc045-suspect`
+    const SAMPLE_BARE_COMMIT: &str = r#"
+[ Proxmark3 ]
+[ Client ]
+Iceman/master/d5dc045-suspect 2026-03-10 16:41:36 015316e05
+[ ARM ]
+OS......... Iceman/master/d5dc045-suspect 2026-03-10 17:58:19 015316e05
+[ Hardware ]
+--= uC: AT91SAM7S512 Rev B
+--= Embedded flash memory 512K bytes ( 43% used )
+"#;
+
+    #[test]
+    fn test_parse_bare_commit_matching() {
+        let info = parse_detailed_hw_version(SAMPLE_BARE_COMMIT);
+        assert!(info.versions_match, "same bare commit hash should match: client={}, os={}", info.client_version, info.os_version);
+        assert_eq!(info.hardware_variant, "generic");
+    }
+
+    #[test]
+    fn test_compare_bare_commit_hash() {
+        // Same bare commit (no `-g` prefix)
+        assert!(compare_versions(
+            "Iceman/master/d5dc045-suspect 2026-03-10 16:41:36 015316e05",
+            "Iceman/master/d5dc045-suspect 2026-03-10 17:58:19 015316e05"
+        ));
+        // Different bare commits
+        assert!(!compare_versions(
+            "Iceman/master/d5dc045-suspect",
+            "Iceman/master/a1b2c3d-suspect"
+        ));
     }
 }

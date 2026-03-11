@@ -7,7 +7,6 @@ use crate::pm3::capabilities::DeviceCapabilities;
 use crate::pm3::connection::{emit_device_status, emit_output};
 use crate::pm3::device_finder;
 use crate::pm3::transport::Pm3Transport;
-use crate::pm3::transport_cli::CliTransportBatch;
 use crate::pm3::transport_interactive::CliTransportInteractive;
 use crate::pm3::transport_mock::MockTransport;
 use crate::pm3::types::OutputLine;
@@ -40,6 +39,8 @@ pub struct Pm3Session {
     last_port: Mutex<Option<String>>,
     /// Dump file path from HF operations (autopwn, dump).
     dump_path: Mutex<Option<String>>,
+    /// Recovered iCLASS key (for Elite/SE cards, from loclass attack).
+    iclass_key: Mutex<Option<String>>,
 }
 
 impl Pm3Session {
@@ -53,6 +54,7 @@ impl Pm3Session {
             port: RwLock::new(None),
             last_port: Mutex::new(None),
             dump_path: Mutex::new(None),
+            iclass_key: Mutex::new(None),
         }
     }
 
@@ -78,6 +80,8 @@ impl Pm3Session {
             true,
             "generic".to_string(),
             "",
+            Vec::new(),
+            Vec::new(),
         );
 
         self.store_session(transport, "mock", caps.clone()).await?;
@@ -101,25 +105,39 @@ impl Pm3Session {
         // Get last known port for hint-based fast discovery
         let hint = self.last_port.lock().ok().and_then(|p| p.clone());
 
-        // Discover device (parallel probing with hint)
+        // Discover device (sequential probing with hint)
         let device = device_finder::find_device_with_hint(
             &self.app,
             hint.as_deref(),
         )
         .await?;
 
-        // Try interactive transport first, fall back to batch
-        let transport: Arc<dyn Pm3Transport> =
-            match self.try_interactive(&device.port).await {
-                Ok(t) => t,
-                Err(_) => Arc::new(CliTransportBatch::new(
-                    self.app.clone(),
-                    device.port.clone(),
-                )),
-            };
+        // Brief delay for serial port release after probe process exits
+        eprintln!("[session] device found: port={}, model={}", device.port, device.model);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Spawn persistent interactive session
+        eprintln!("[session] spawning interactive session on {}...", device.port);
+        let transport: Arc<dyn Pm3Transport> = self.try_interactive(&device.port).await
+            .map_err(|e| {
+                eprintln!("[session] interactive session FAILED: {}", e);
+                AppError::CommandFailed(format!(
+                    "Failed to establish interactive session: {}", e
+                ))
+            })?;
+        eprintln!("[session] interactive session OK!");
 
         // Parse capabilities from the discovery probe output
+        eprintln!("[session] === Raw hw version output ===");
+        for line in device.hw_version_output.lines() {
+            eprintln!("[session]   {}", line);
+        }
+        eprintln!("[session] ==============================");
         let info = parse_detailed_hw_version(&device.hw_version_output);
+        eprintln!("[session] Parsed: client={}, os={}, hw={}, match={}",
+            info.client_version, info.os_version, info.hardware_variant, info.versions_match);
+        eprintln!("[session] Compiled LF modules: {:?}", info.compiled_with_lf);
+        eprintln!("[session] Compiled HF modules: {:?}", info.compiled_with_hf);
         let caps = DeviceCapabilities::from_hw_version(
             device.port.clone(),
             device.model.clone(),
@@ -128,6 +146,8 @@ impl Pm3Session {
             info.versions_match,
             device.hardware_variant.clone(),
             &device.hw_version_output,
+            info.compiled_with_lf,
+            info.compiled_with_hf,
         );
 
         self.store_session(transport, &device.port, caps.clone())
@@ -371,6 +391,18 @@ impl Pm3Session {
     pub fn set_dump_path(&self, path: Option<String>) {
         if let Ok(mut d) = self.dump_path.lock() {
             *d = path;
+        }
+    }
+
+    /// Get the recovered iCLASS key (for Elite/SE cards).
+    pub fn get_iclass_key(&self) -> Option<String> {
+        self.iclass_key.lock().ok().and_then(|k| k.clone())
+    }
+
+    /// Set the recovered iCLASS key.
+    pub fn set_iclass_key(&self, key: Option<String>) {
+        if let Ok(mut k) = self.iclass_key.lock() {
+            *k = key;
         }
     }
 }

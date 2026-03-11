@@ -21,13 +21,25 @@ pub struct AntennaResult {
 }
 
 /// Parse LF voltage (mV) from `hw tune` output.
-/// Looks for lines like: "LF antenna: 47.36 V @ 125.00 kHz"
+///
+/// PM3 v4 Iceman format puts the voltage on the frequency line, not the
+/// "LF antenna" summary line:
+///   `[+] 125.00 kHz ........... 19.72 V`   ← voltage here
+///   `[+] LF antenna............ ok`         ← no voltage
+///
+/// We check both patterns for compatibility with different firmware versions.
 fn parse_lf_mv(output: &str) -> Option<f32> {
     let clean = output_parser::strip_ansi(output);
     for line in clean.lines() {
         let lower = line.to_lowercase();
+        // v4 Iceman: "[+] 125.00 kHz ........... 19.72 V"
+        if lower.contains("125.00 khz") || lower.contains("125.0 khz") || lower.contains("125 khz") {
+            if let Some(v) = extract_voltage_mv(line) {
+                return Some(v);
+            }
+        }
+        // Older format: "LF antenna: 47.36 V @ 125.00 kHz"
         if lower.contains("lf antenna") {
-            // Match "XX.XX V" anywhere in the line
             if let Some(v) = extract_voltage_mv(line) {
                 return Some(v);
             }
@@ -37,11 +49,21 @@ fn parse_lf_mv(output: &str) -> Option<f32> {
 }
 
 /// Parse HF voltage (mV) from `hw tune` output.
-/// Looks for lines like: "HF antenna: 28.13 V @ 13.56 MHz"
+///
+/// PM3 v4 Iceman format:
+///   `[+] 13.56 MHz............. 15.88 V`   ← voltage here
+///   `[+] HF antenna ( ok )`                ← no voltage
 fn parse_hf_mv(output: &str) -> Option<f32> {
     let clean = output_parser::strip_ansi(output);
     for line in clean.lines() {
         let lower = line.to_lowercase();
+        // v4 Iceman: "[+] 13.56 MHz............. 15.88 V"
+        if lower.contains("13.56 mhz") {
+            if let Some(v) = extract_voltage_mv(line) {
+                return Some(v);
+            }
+        }
+        // Older format: "HF antenna: 28.13 V @ 13.56 MHz"
         if lower.contains("hf antenna") {
             if let Some(v) = extract_voltage_mv(line) {
                 return Some(v);

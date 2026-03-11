@@ -129,7 +129,7 @@ export function MainLayout() {
       case 'saved':
         return (
           <div style={{ padding: 'var(--space-6)' }}>
-            <SavedView refreshTrigger={refreshTrigger} />
+            <SavedView refreshTrigger={refreshTrigger} onNavigateToClone={() => setActiveTab('clone')} />
           </div>
         );
       case 'settings':

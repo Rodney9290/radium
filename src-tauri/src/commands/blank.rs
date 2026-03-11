@@ -49,6 +49,9 @@ pub async fn detect_blank(
         }
         BlankType::MagicUltralight => detect_magic_ultralight(session.inner(), &machine).await,
         BlankType::IClassBlank => detect_iclass_blank(session.inner(), &machine).await,
+        BlankType::RegularMifare => {
+            detect_magic_mifare(session.inner(), &machine, expected_blank).await
+        }
     }
 }
 
@@ -243,14 +246,14 @@ async fn detect_magic_mifare(
             Ok(m.current.clone())
         }
         None => {
-            // Card present but no magic detected — could be genuine MIFARE.
-            // Still allow proceeding (some magic cards aren't detected by `hf mf info`).
+            // Card present but no magic detected — regular MIFARE Classic.
+            // Allow data-only write (sectors 1+) via `hf mf restore`, UID unchanged.
             let mut m = machine.lock().map_err(|e| {
                 AppError::CommandFailed(format!("State lock poisoned: {}", e))
             })?;
             m.transition(WizardAction::BlankReady {
-                blank_type: expected_blank,
-                existing_data_type: Some("No magic detected — card may be genuine".to_string()),
+                blank_type: BlankType::RegularMifare,
+                existing_data_type: Some("Regular MIFARE (not magic) — data sectors only, UID unchanged".to_string()),
             })?;
             Ok(m.current.clone())
         }

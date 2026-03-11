@@ -282,6 +282,33 @@ export async function hfEraseCard(): Promise<string> {
   return invoke<string>('hf_erase_card');
 }
 
+/**
+ * Check if a dump file exists for a given UID and set it in the session.
+ * Used to skip autopwn when loading a saved card that was already dumped.
+ * Returns the dump file path if found, null otherwise.
+ */
+export async function checkDumpExists(uid: string): Promise<string | null> {
+  return invoke<string | null>('check_dump_exists', { uid });
+}
+
+/**
+ * iCLASS Elite: Simulate tag at a reader to collect MAC traces.
+ * User must present PM3 at the physical door reader.
+ * Returns status message with MAC count.
+ */
+export async function iclassCollectMacs(): Promise<string> {
+  return invoke<string>('iclass_collect_macs');
+}
+
+/**
+ * iCLASS Elite: Run loclass attack to recover diversified key.
+ * Must call iclassCollectMacs() first.
+ * Returns recovered key on success.
+ */
+export async function iclassLoclassRecover(): Promise<string> {
+  return invoke<string>('iclass_loclass_recover');
+}
+
 // -- Saved Cards -------------------------------------------------------
 
 /**

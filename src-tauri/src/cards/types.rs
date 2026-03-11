@@ -167,6 +167,42 @@ impl CardType {
         )
     }
 
+    /// Return the firmware module keyword needed to detect/interact with this card type.
+    /// Used to check against DeviceCapabilities compiled_with_lf/hf lists.
+    pub fn required_module(&self) -> &str {
+        match self {
+            CardType::EM4100 => "EM 4x05",
+            CardType::HIDProx => "HID Prox",
+            CardType::Indala => "Indala",
+            CardType::IOProx => "IO Prox",
+            CardType::AWID => "AWID",
+            CardType::FDX_B => "FDX",
+            CardType::Paradox => "Paradox",
+            CardType::Viking => "Viking",
+            CardType::Pyramid => "Pyramid",
+            CardType::Keri => "Keri",
+            CardType::NexWatch => "NexWatch",
+            CardType::Presco => "Presco",
+            CardType::Nedap => "Nedap",
+            CardType::GProxII => "G-Prox",
+            CardType::Gallagher => "Gallagher",
+            CardType::PAC => "PAC",
+            CardType::Noralsy => "Noralsy",
+            CardType::Jablotron => "Jablotron",
+            CardType::SecuraKey => "SecuraKey",
+            CardType::Visa2000 => "Visa2000",
+            CardType::Motorola => "Motorola",
+            CardType::IDTECK => "IDTECK",
+            CardType::COTAG => "COTAG",
+            CardType::EM4x50 => "EM 4x50",
+            CardType::Hitag => "Hitag",
+            CardType::MifareClassic1K | CardType::MifareClassic4K => "MIFARE Classic",
+            CardType::MifareUltralight | CardType::NTAG => "14443A",
+            CardType::DESFire => "DESFire",
+            CardType::IClass => "iCLASS",
+        }
+    }
+
     pub fn recommended_blank(&self) -> BlankType {
         match self {
             // All LF cloneable types use T5577 by default
@@ -215,6 +251,8 @@ pub enum BlankType {
     MagicMifareGen4GDM,
     MagicUltralight,
     IClassBlank,
+    /// Regular (non-magic) MIFARE Classic — data sectors only, UID unchanged.
+    RegularMifare,
 }
 
 impl BlankType {
@@ -231,6 +269,7 @@ impl BlankType {
             BlankType::MagicMifareGen4GDM => "Magic MIFARE Gen4 GDM",
             BlankType::MagicUltralight => "Magic Ultralight",
             BlankType::IClassBlank => "iCLASS Blank",
+            BlankType::RegularMifare => "Regular MIFARE Classic",
         }
     }
 }

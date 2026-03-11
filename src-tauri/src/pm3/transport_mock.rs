@@ -291,6 +291,14 @@ const HW_VERSION: &str = r#"
   --= uC: AT91SAM7S512 Rev B
   --= Embedded flash memory 512K bytes ( 40% used )
 
+ [ Compiled with support for ]
+   LF: EM 4x05/4x69, EM 4x50/4x70, HID Prox, Indala, AWID, IO Prox, FDX-B,
+       Paradox, Viking, Pyramid, Keri, NexWatch, Presco, Nedap, G-Prox-II,
+       Gallagher, PAC/Stanley, Noralsy, Jablotron, SecuraKey, Visa2000,
+       Motorola, IDTECK, COTAG, Hitag, T55xx
+   HF: ISO 14443A, ISO 14443B, MIFARE Classic, MIFARE DESFire, iCLASS,
+       ISO 15693, Legic, Topaz, Felica, SEOS
+
 [=] [mock] Simulated Proxmark3 Easy
 "#;
 

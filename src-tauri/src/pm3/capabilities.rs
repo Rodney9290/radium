@@ -77,6 +77,10 @@ pub struct DeviceCapabilities {
     pub has_smartcard: bool,
     /// Whether BT addon is present
     pub has_bt: bool,
+    /// LF protocol modules compiled into the firmware
+    pub compiled_with_lf: Vec<String>,
+    /// HF protocol modules compiled into the firmware
+    pub compiled_with_hf: Vec<String>,
 }
 
 impl DeviceCapabilities {
@@ -89,6 +93,8 @@ impl DeviceCapabilities {
         versions_match: bool,
         hardware_variant: String,
         hw_version_output: &str,
+        compiled_with_lf: Vec<String>,
+        compiled_with_hf: Vec<String>,
     ) -> Self {
         let platform = Self::detect_platform(&hardware_variant);
         let has_external_flash = hw_version_output
@@ -121,7 +127,35 @@ impl DeviceCapabilities {
             has_external_flash,
             has_smartcard,
             has_bt,
+            compiled_with_lf,
+            compiled_with_hf,
         }
+    }
+
+    /// Check if compiled module info is available (firmware reported it).
+    pub fn has_module_info(&self) -> bool {
+        !self.compiled_with_lf.is_empty() || !self.compiled_with_hf.is_empty()
+    }
+
+    /// Check if a specific LF module keyword is compiled in.
+    /// Matches case-insensitively against any compiled LF module name.
+    /// Returns true if no module info is available (assume all modules present).
+    pub fn has_lf_module(&self, keyword: &str) -> bool {
+        if !self.has_module_info() {
+            return true; // No info available — assume present
+        }
+        let kw = keyword.to_lowercase();
+        self.compiled_with_lf.iter().any(|m| m.to_lowercase().contains(&kw))
+    }
+
+    /// Check if a specific HF module keyword is compiled in.
+    /// Returns true if no module info is available (assume all modules present).
+    pub fn has_hf_module(&self, keyword: &str) -> bool {
+        if !self.has_module_info() {
+            return true; // No info available — assume present
+        }
+        let kw = keyword.to_lowercase();
+        self.compiled_with_hf.iter().any(|m| m.to_lowercase().contains(&kw))
     }
 
     fn detect_platform(variant: &str) -> ProxmarkPlatform {
@@ -148,6 +182,8 @@ impl Default for DeviceCapabilities {
             has_external_flash: false,
             has_smartcard: false,
             has_bt: false,
+            compiled_with_lf: Vec::new(),
+            compiled_with_hf: Vec::new(),
         }
     }
 }

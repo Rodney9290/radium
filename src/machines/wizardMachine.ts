@@ -887,9 +887,9 @@ export const wizardMachine = setup({
     error: {
       on: {
         RETRY: {
-          guard: ({ context }) => context.errorRecoverable,
-          target: 'idle',
-          actions: assign(() => initialContext),
+          guard: ({ context }) => context.errorRecoverable && !!context.port,
+          target: 'deviceConnected',
+          actions: assign(() => clearCardFields),
         },
         SOFT_RESET: {
           target: 'deviceConnected',

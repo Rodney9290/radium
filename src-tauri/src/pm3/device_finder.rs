@@ -1,17 +1,14 @@
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
-use tokio::task::JoinSet;
+use tauri_plugin_shell::process::CommandEvent;
 use tokio::time::timeout;
 
 use crate::error::AppError;
 use crate::pm3::connection::emit_output;
 use crate::pm3::output_parser::strip_ansi;
-use crate::pm3::transport_cli::{build_port_candidates, validate_port};
+use crate::pm3::transport_cli::{build_port_candidates, pm3_scope_names, validate_port};
 use crate::pm3::version::parse_detailed_hw_version;
-
-/// Maximum number of concurrent port probes.
-const MAX_CONCURRENT_PROBES: usize = 4;
 
 /// Result of scanning for a PM3 device.
 #[derive(Debug, Clone, Serialize)]
@@ -98,67 +95,45 @@ pub async fn find_device_with_hint(
         return Err(AppError::DeviceNotFound);
     }
 
-    // Probe ports in parallel batches
-    for chunk in candidates.chunks(MAX_CONCURRENT_PROBES) {
-        // Log which ports we're trying
-        for port in chunk {
-            emit_output(app, &format!("[=] Trying {}...", port), false);
-        }
+    // Probe ports sequentially to avoid zombie processes from parallel spawns.
+    // With dynamic port discovery we typically have only 1-2 real candidates,
+    // so sequential probing is fast enough.
+    for port in &candidates {
+        emit_output(app, &format!("[=] Trying {}...", port), false);
 
-        let mut join_set = JoinSet::new();
+        match probe_port(app, port).await {
+            Ok(device) => {
+                emit_output(
+                    app,
+                    &format!("[+] Found: {} on {}", device.model, port),
+                    false,
+                );
+                emit_output(
+                    app,
+                    &format!("[+] Firmware: {}", device.firmware),
+                    false,
+                );
+                return Ok(device);
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
 
-        for port in chunk {
-            let app_clone = app.clone();
-            let port_owned = port.clone();
-            join_set.spawn(async move {
-                let result = probe_port(&app_clone, &port_owned).await;
-                (port_owned, result)
-            });
-        }
+                // Capabilities mismatch = device present but firmware mismatched
+                if err_msg.to_lowercase().contains("capabilities") {
+                    return handle_capabilities_mismatch(app, port);
+                }
 
-        // Collect results from this batch
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok((port, Ok(device))) => {
-                    // Found a device — abort remaining probes in this batch
-                    join_set.abort_all();
+                // Binary not found = affects all ports, fail fast
+                if err_msg.contains("Failed to spawn proxmark3") {
                     emit_output(
                         app,
-                        &format!("[+] Found: {} on {}", device.model, port),
-                        false,
+                        "[!!] Proxmark3 binary not found. Check installation.",
+                        true,
                     );
-                    emit_output(
-                        app,
-                        &format!("[+] Firmware: {}", device.firmware),
-                        false,
-                    );
-                    return Ok(device);
+                    return Err(e);
                 }
-                Ok((port, Err(e))) => {
-                    let err_msg = e.to_string();
 
-                    // Capabilities mismatch = device present but firmware mismatched
-                    if err_msg.to_lowercase().contains("capabilities") {
-                        join_set.abort_all();
-                        return handle_capabilities_mismatch(app, &port);
-                    }
-
-                    // Binary not found = affects all ports, fail fast
-                    if err_msg.contains("Failed to spawn proxmark3") {
-                        join_set.abort_all();
-                        emit_output(
-                            app,
-                            "[!!] Proxmark3 binary not found. Check installation.",
-                            true,
-                        );
-                        return Err(e);
-                    }
-
-                    emit_output(app, &format!("[-] {} -- no response", port), false);
-                }
-                Err(_join_err) => {
-                    // Task was cancelled or panicked — skip
-                }
+                emit_output(app, &format!("[-] {} -- no response", port), false);
             }
         }
     }
@@ -184,19 +159,24 @@ fn handle_capabilities_mismatch(app: &AppHandle, port: &str) -> Result<Discovere
 }
 
 /// Probe a single port by running `hw version`.
+///
+/// Tries batch mode first (`-p PORT -f -c CMD`) which works cleanly with v4.x,
+/// then falls back to interactive spawn for old v3.x clients.
 async fn probe_port(app: &AppHandle, port: &str) -> Result<DiscoveredDevice, AppError> {
     if validate_port(port).is_err() {
         return Err(AppError::CommandFailed(format!("Invalid port: {}", port)));
     }
 
-    let pm3_timeout = std::time::Duration::from_secs(10);
+    // === Try batch mode first (clean, works with v4.x clients) ===
+    let batch_timeout = std::time::Duration::from_secs(10);
     let cmd = "hw version";
+    let batch_args = ["-p", port, "-f", "-c", cmd];
 
-    // Try sidecar first
+    // Sidecar batch
     if let Ok(sidecar) = app.shell().sidecar("binaries/proxmark3") {
         if let Ok(Ok(output)) = timeout(
-            pm3_timeout,
-            sidecar.args(["-p", port, "-f", "-c", cmd]).output(),
+            batch_timeout,
+            sidecar.args(&batch_args).output(),
         )
         .await
         {
@@ -214,67 +194,139 @@ async fn probe_port(app: &AppHandle, port: &str) -> Result<DiscoveredDevice, App
         }
     }
 
-    // Try scope names
-    let scope_names = vec!["proxmark3"];
-    let extended: Vec<&str> = if cfg!(target_os = "windows") {
-        vec!["proxmark3-win-c", "proxmark3-win-progfiles"]
-    } else if cfg!(target_os = "macos") {
-        vec!["proxmark3-mac-local", "proxmark3-mac-brew"]
-    } else {
-        vec!["proxmark3-linux-local", "proxmark3-linux-usr"]
-    };
-
-    for scope_name in scope_names.iter().chain(extended.iter()) {
-        let result = timeout(
-            pm3_timeout,
-            app.shell()
-                .command(scope_name)
-                .args(["-p", port, "-f", "-c", cmd])
-                .output(),
+    // Scope-based batch
+    let scope_names = pm3_scope_names();
+    for scope_name in &scope_names {
+        eprintln!("[probe_port] trying scope '{}' with batch args {:?}", scope_name, batch_args);
+        match timeout(
+            batch_timeout,
+            app.shell().command(scope_name).args(&batch_args).output(),
         )
-        .await;
-
-        match result {
+        .await
+        {
             Ok(Ok(output)) => {
                 let code = output.status.code().unwrap_or(-1);
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                eprintln!("[probe_port] scope '{}' exit={}, stdout_len={}, stderr_len={}", scope_name, code, stdout.len(), stderr.len());
+                if !stderr.is_empty() {
+                    eprintln!("[probe_port] stderr: {:?}", &stderr[..stderr.len().min(200)]);
+                }
 
                 if code == 0 {
                     let cleaned = strip_ansi(&stdout);
                     if let Some(device) = parse_probe_output(port, &cleaned) {
                         return Ok(device);
                     }
+                    eprintln!("[probe_port] parse_probe_output returned None for scope '{}'", scope_name);
                 }
-
-                // Check for capabilities mismatch
                 let combined = format!("{} {}", stdout, stderr);
                 if combined.to_lowercase().contains("capabilities") {
                     return Err(AppError::CommandFailed("capabilities mismatch".into()));
                 }
-
-                // Non-zero exit but binary was found
-                if code != 0 {
-                    return Err(AppError::CommandFailed(format!(
-                        "Exit code {}",
-                        code
-                    )));
+                // Only break if the binary was found (non-zero exit = binary exists but failed)
+                if code >= 0 {
+                    break;
                 }
             }
-            Ok(Err(_)) => {
-                // Spawn failed at this scope name, try next
-                continue;
+            Ok(Err(e)) => {
+                eprintln!("[probe_port] scope '{}' spawn error: {}", scope_name, e);
             }
             Err(_) => {
-                // Timeout
-                return Err(AppError::Timeout("Probe timed out".into()));
+                eprintln!("[probe_port] scope '{}' timed out", scope_name);
             }
         }
+    }
+
+    // === Fallback: interactive spawn for old v3.x clients ===
+    let pm3_timeout = std::time::Duration::from_secs(10);
+    if let Some(device) = probe_port_interactive(app, port, pm3_timeout).await {
+        return Ok(device);
     }
 
     Err(AppError::CommandFailed(
         "Failed to spawn proxmark3: binary not found".into(),
     ))
+}
+
+/// Probe using interactive spawn: `proxmark3 <port>` with stdin piped commands.
+/// Works with old iceman v3.x that doesn't support `-p`/`-c` flags.
+async fn probe_port_interactive(
+    app: &AppHandle,
+    port: &str,
+    pm3_timeout: std::time::Duration,
+) -> Option<DiscoveredDevice> {
+    let args = [port];
+
+    // Try sidecar first, then scope names
+    let spawn_result = if let Ok(cmd) = app.shell().sidecar("binaries/proxmark3") {
+        cmd.args(&args).spawn().ok()
+    } else {
+        None
+    };
+
+    let (mut rx, mut child) = if let Some(result) = spawn_result {
+        result
+    } else {
+        let scope_names = pm3_scope_names();
+        let mut found = None;
+        for name in &scope_names {
+            match app.shell().command(name).args(&args).spawn() {
+                Ok(result) => {
+                    found = Some(result);
+                    break;
+                }
+                Err(_) => {}
+            }
+        }
+        match found {
+            Some(f) => f,
+            None => return None,
+        }
+    };
+
+    // Write "hw version" to stdin, then collect output
+    let _ = child.write("hw version\n".as_bytes());
+
+    let mut collected = String::new();
+    let deadline = tokio::time::Instant::now() + pm3_timeout;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+
+        match timeout(remaining, rx.recv()).await {
+            Ok(Some(event)) => match event {
+                CommandEvent::Stdout(line) => {
+                    let text = String::from_utf8_lossy(&line);
+                    collected.push_str(&text);
+                    collected.push('\n');
+                    // Once we see the prompt after hw version output, we have enough
+                    let cleaned = strip_ansi(&collected);
+                    if cleaned.contains("pm3 -->") && cleaned.contains("[ ARM ]") {
+                        break;
+                    }
+                }
+                CommandEvent::Stderr(line) => {
+                    let text = String::from_utf8_lossy(&line);
+                    collected.push_str(&text);
+                    collected.push('\n');
+                }
+                CommandEvent::Terminated(_) => break,
+                _ => {}
+            },
+            Ok(None) => break, // channel closed
+            Err(_) => break,   // timeout
+        }
+    }
+
+    // Kill the interactive process
+    let _ = child.kill();
+
+    let cleaned = strip_ansi(&collected);
+    parse_probe_output(port, &cleaned)
 }
 
 /// Parse `hw version` output into a DiscoveredDevice.

@@ -87,6 +87,15 @@ pub async fn wipe_chip(
             command_builder::build_t5577_wipe().to_string()
         }
         "EM4305" => command_builder::build_em4305_wipe().to_string(),
+        // MIFARE Classic erase — resets all sectors to factory defaults using known keys
+        "MagicMifareGen1a" | "MagicMifareGen2" | "MagicMifareGen3"
+        | "MagicMifareGen4GTU" | "MagicMifareGen4GDM" | "RegularMifare" => {
+            command_builder::build_hf_mf_erase().to_string()
+        }
+        // iCLASS erase — wipe using leaked master key
+        "IClassBlank" => {
+            command_builder::build_iclass_wipe().to_string()
+        }
         other => {
             return Err(AppError::CommandFailed(format!(
                 "Unsupported chip type for wipe: {}",
@@ -97,8 +106,23 @@ pub async fn wipe_chip(
 
     let wipe_output = session.run_command(&wipe_cmd).await?;
 
-    // Check for errors in output
-    if wipe_output.contains("[!!]") || wipe_output.to_lowercase().contains("error") {
+    // Check for errors in output (skip block 0 errors for regular MIFARE — expected)
+    let is_regular_mifare = chip_type == "RegularMifare";
+    let has_fatal_error = wipe_output.lines().any(|line| {
+        if !line.contains("[!!]") && !line.to_lowercase().contains("error") {
+            return false;
+        }
+        // Block 0 errors are expected on regular (non-magic) MIFARE
+        if is_regular_mifare {
+            let lower = line.to_lowercase();
+            if lower.contains("block 0") || lower.contains("block 00") || lower.contains("blk 0") {
+                return false;
+            }
+        }
+        true
+    });
+
+    if has_fatal_error {
         return Ok(WipeResult {
             success: false,
             message: format!(

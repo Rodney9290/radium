@@ -48,7 +48,8 @@ export type BlankType =
   | 'MagicMifareGen4GTU'
   | 'MagicMifareGen4GDM'
   | 'MagicUltralight'
-  | 'IClassBlank';
+  | 'IClassBlank'
+  | 'RegularMifare';
 
 export type RecoveryAction = 'Retry' | 'GoBack' | 'Reconnect' | 'Manual';
 

@@ -5,6 +5,7 @@ import { Badge } from '../shared/Badge';
 import { InlineNotice } from '../shared/InlineNotice';
 import { Spinner } from '../shared/Spinner';
 import { OnboardingTip } from '../onboarding/OnboardingTip';
+import { EliteRecoveryPanel } from './EliteRecoveryPanel';
 import type { CardData, CardType, Frequency } from '../../machines/types';
 
 interface ScanStepProps {
@@ -40,13 +41,17 @@ export function ScanStep({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [savedDisplayName, setSavedDisplayName] = useState('');
   const [showWriteConfirm, setShowWriteConfirm] = useState(false);
+  const [eliteKeyRecovered, setEliteKeyRecovered] = useState(false);
 
   // Card has been identified -- show results
   if (cardData && cardType) {
     const freqLabel = frequency === 'LF' ? '125 kHz (LF)' : frequency === 'HF' ? '13.56 MHz (HF)' : 'Unknown';
     const decodedEntries = cardData.decoded
-      ? Object.entries(cardData.decoded).filter(([key]) => key !== 'type' && key !== 'uid' && key !== 'prng')
+      ? Object.entries(cardData.decoded).filter(([key]) => key !== 'type' && key !== 'uid' && key !== 'prng' && key !== 'iclass_elite')
       : [];
+
+    // iCLASS Elite detection
+    const isIClassElite = cardType === 'IClass' && cardData.decoded?.iclass_elite === 'true';
 
     // Attack plan for MIFARE Classic HF cards
     const isMifareClassic = cardType === 'MifareClassic1K' || cardType === 'MifareClassic4K';
@@ -125,6 +130,11 @@ export function ScanStep({
                   <AttackRow label="Buy blank" value={attackPlan.blank} />
                 </div>
               </div>
+            )}
+
+            {/* Elite key recovery panel for iCLASS Elite/SE */}
+            {isIClassElite && (
+              <EliteRecoveryPanel onKeyRecovered={() => setEliteKeyRecovered(true)} />
             )}
 
             {/* Info rows */}
@@ -223,8 +233,9 @@ export function ScanStep({
                   variant="primary"
                   size="sm"
                   onClick={() => skipSwapConfirm ? onScanned() : setShowWriteConfirm(true)}
+                  disabled={isIClassElite && !eliteKeyRecovered}
                 >
-                  Write Clone
+                  {isIClassElite && !eliteKeyRecovered ? 'Recover Key First' : 'Write Clone'}
                 </Button>
               )}
             </div>

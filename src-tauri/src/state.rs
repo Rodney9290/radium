@@ -434,9 +434,17 @@ impl WizardMachine {
                 timestamp: chrono::Local::now().to_rfc3339(),
             },
 
-            // Error + Retry -> Idle (user can restart the flow)
+            // Error + Retry -> DeviceConnected (keep device, clear card data)
             (WizardState::Error { recoverable: true, .. }, WizardAction::Retry) => {
-                WizardState::Idle
+                match (&self.port, &self.model, &self.firmware) {
+                    (Some(p), Some(m), Some(f)) => WizardState::DeviceConnected {
+                        port: p.clone(),
+                        model: m.clone(),
+                        firmware: f.clone(),
+                    },
+                    // Fallback to Idle if no device info persisted
+                    _ => WizardState::Idle,
+                }
             }
 
             // Complete -> Idle (start over)

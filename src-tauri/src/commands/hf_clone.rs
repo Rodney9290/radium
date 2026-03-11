@@ -234,6 +234,38 @@ pub async fn hf_autopwn(
     }
 }
 
+/// Check if an HF dump file exists for a given UID and set the path in session.
+/// Used to skip autopwn when loading a saved card that was already dumped.
+/// Returns the dump file path if found, None otherwise.
+#[tauri::command]
+pub async fn check_dump_exists(
+    uid: String,
+    session: State<'_, Pm3Session>,
+) -> Result<Option<String>, AppError> {
+    let clean_uid: String = uid.chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>().to_uppercase();
+    if clean_uid.is_empty() {
+        return Ok(None);
+    }
+
+    // Check common dump file locations (PM3 writes to CWD, which is usually $HOME)
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let candidates = vec![
+        format!("{}/hf-mf-{}-dump.bin", home, clean_uid),
+        format!("{}/hf-mf-{}-dump-001.bin", home, clean_uid),
+        format!("hf-mf-{}-dump.bin", clean_uid),
+        format!("hf-mf-{}-dump-001.bin", clean_uid),
+    ];
+
+    for path in candidates {
+        if std::path::Path::new(&path).exists() {
+            session.set_dump_path(Some(path.clone()));
+            return Ok(Some(path));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Cancel a running HF operation (autopwn, dump, write) by killing the child process.
 #[tauri::command]
 pub async fn cancel_hf_operation(
@@ -335,6 +367,9 @@ pub async fn hf_write_clone(
         BlankType::IClassBlank => {
             write_iclass(session.inner(), &dump_path, &machine).await
         }
+        BlankType::RegularMifare => {
+            write_regular_mifare(session.inner(), &dump_path, &machine).await
+        }
         _ => {
             Err(AppError::CommandFailed(format!(
                 "Unsupported HF blank type: {:?}",
@@ -400,9 +435,22 @@ pub async fn hf_dump(
     };
 
     // Select dump command based on card type
-    let cmd = match card_type {
-        CardType::IClass => command_builder::build_iclass_dump(),
-        _ => command_builder::build_mfu_dump(), // UL + NTAG
+    let (cmd_str, cmd_static);
+    let cmd: &str = match card_type {
+        CardType::IClass => {
+            // Try stored key first (from loclass recovery), then fall back to master key
+            if let Some(ref key) = session.get_iclass_key() {
+                cmd_str = command_builder::build_iclass_dump_with_key(key);
+                &cmd_str
+            } else {
+                cmd_static = command_builder::build_iclass_dump();
+                cmd_static
+            }
+        }
+        _ => {
+            cmd_static = command_builder::build_mfu_dump(); // UL + NTAG
+            cmd_static
+        }
     };
 
     let result = session.run_command(cmd).await;
@@ -579,7 +627,7 @@ async fn write_ultralight(
     finish_write(session, machine).await
 }
 
-/// iCLASS: single `hf iclass restore` with default key (key index 0).
+/// iCLASS: single `hf iclass restore` with default or recovered key.
 async fn write_iclass(
     session: &Pm3Session,
     dump_path: &str,
@@ -587,9 +635,34 @@ async fn write_iclass(
 ) -> Result<WizardState, AppError> {
     update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
 
-    let cmd = command_builder::build_iclass_restore(dump_path);
+    // Use recovered key for Elite/SE cards, master key for Legacy
+    let cmd = if let Some(ref key) = session.get_iclass_key() {
+        command_builder::build_iclass_restore_with_key(dump_path, key)
+    } else {
+        command_builder::build_iclass_restore(dump_path)
+    };
     let output = session.run_command(&cmd).await?;
     check_write_output(&output)?;
+
+    finish_write(session, machine).await
+}
+
+/// Regular (non-magic) MIFARE Classic: restore data sectors only via `hf mf restore`.
+/// Block 0 (UID) is NOT written — only data blocks are restored using the recovered keys.
+/// This works on standard Fudan/NXP MIFARE Classic cards that don't support magic commands.
+///
+/// Uses lenient error checking: block 0 write failures are expected on non-magic cards
+/// (block 0 is manufacturer-locked / read-only). Only non-block-0 errors are fatal.
+async fn write_regular_mifare(
+    session: &Pm3Session,
+    dump_path: &str,
+    machine: &State<'_, Mutex<WizardMachine>>,
+) -> Result<WizardState, AppError> {
+    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
+
+    let cmd = command_builder::build_mf_restore(dump_path);
+    let output = session.run_command(&cmd).await?;
+    check_write_output_regular_mifare(&output)?;
 
     finish_write(session, machine).await
 }
@@ -673,6 +746,26 @@ fn check_write_output(output: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Lenient error check for RegularMifare writes.
+/// Block 0 write failures are expected on non-magic cards (manufacturer-locked).
+/// Only treats non-block-0 `[!!]` errors as fatal.
+fn check_write_output_regular_mifare(output: &str) -> Result<(), AppError> {
+    for line in output.lines() {
+        if line.contains("[!!]") {
+            let lower = line.to_lowercase();
+            // Tolerate block 0 / sector 0 write failures (expected on regular MIFARE)
+            if lower.contains("block 0") || lower.contains("block 00") || lower.contains("blk 0") {
+                continue;
+            }
+            return Err(AppError::CommandFailed(format!(
+                "PM3 write error: {}",
+                line.trim()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Report an error via FSM transition and return the resulting state.
 fn report_error(
     machine: &State<'_, Mutex<WizardMachine>>,
@@ -734,26 +827,37 @@ pub async fn hf_verify_clone(
     let search_output =
         session.run_command(command_builder::build_hf_search()).await;
 
-    let uid_match = match &search_output {
-        Ok(output) => {
-            if let Some((_, card_data)) = output_parser::parse_hf_search(output) {
-                let clean_source: String = source_uid
-                    .chars()
-                    .filter(|c| c.is_ascii_hexdigit())
-                    .collect::<String>()
-                    .to_uppercase();
-                let clean_detected: String = card_data
-                    .uid
-                    .chars()
-                    .filter(|c| c.is_ascii_hexdigit())
-                    .collect::<String>()
-                    .to_uppercase();
-                clean_source == clean_detected
-            } else {
-                false
-            }
+    // RegularMifare: skip UID check (can't write block 0 on non-magic cards)
+    let skip_uid_check = matches!(blank_type, BlankType::RegularMifare);
+
+    let uid_match = if skip_uid_check {
+        // Just confirm the card is present
+        match &search_output {
+            Ok(output) => output_parser::parse_hf_search(output).is_some(),
+            Err(_) => false,
         }
-        Err(_) => false,
+    } else {
+        match &search_output {
+            Ok(output) => {
+                if let Some((_, card_data)) = output_parser::parse_hf_search(output) {
+                    let clean_source: String = source_uid
+                        .chars()
+                        .filter(|c| c.is_ascii_hexdigit())
+                        .collect::<String>()
+                        .to_uppercase();
+                    let clean_detected: String = card_data
+                        .uid
+                        .chars()
+                        .filter(|c| c.is_ascii_hexdigit())
+                        .collect::<String>()
+                        .to_uppercase();
+                    clean_source == clean_detected
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
     };
 
     if !uid_match {
@@ -800,11 +904,20 @@ pub async fn hf_verify_clone(
             .await
         }
         BlankType::IClassBlank => {
-            // iCLASS: dump blocks and compare
+            // iCLASS: dump blocks and compare (use stored key if Elite)
+            let cmd = if let Some(ref key) = session.get_iclass_key() {
+                command_builder::build_iclass_dump_with_key(key)
+            } else {
+                command_builder::build_iclass_dump().to_string()
+            };
+            verify_readback(session.inner(), &cmd, 8).await
+        }
+        BlankType::RegularMifare => {
+            // Regular MIFARE: read back using recovered keys, same as Gen2+
             verify_readback(
                 session.inner(),
-                command_builder::build_iclass_dump(),
-                8,
+                command_builder::build_mf_dump(),
+                16,
             )
             .await
         }
@@ -882,4 +995,65 @@ fn compare_dump_files(original: &str, readback: &str, block_size: usize) -> Vec<
     }
 
     mismatched
+}
+
+// ---------------------------------------------------------------------------
+// iCLASS Elite key recovery (loclass attack)
+// ---------------------------------------------------------------------------
+
+/// Step 1: Simulate an iCLASS tag at a real reader to collect MAC traces.
+/// The user must physically present the PM3 at the door reader.
+/// Collects authentication traces needed for the loclass key recovery attack.
+///
+/// Returns a status message indicating how many MACs were collected.
+#[tauri::command]
+pub async fn iclass_collect_macs(
+    session: State<'_, Pm3Session>,
+) -> Result<String, AppError> {
+    let output = session
+        .run_command(command_builder::build_iclass_sim_collect())
+        .await?;
+
+    // Count collected MACs from output
+    let mac_count = output
+        .lines()
+        .filter(|l| l.contains("[+]") && l.to_lowercase().contains("mac"))
+        .count();
+
+    if mac_count > 0 {
+        Ok(format!("Collected {} MAC trace(s). Ready for key recovery.", mac_count))
+    } else if output.contains("[+]") {
+        Ok("Simulation complete. MAC traces collected.".to_string())
+    } else {
+        Err(AppError::CommandFailed(
+            "No MAC traces collected. Present the PM3 at the reader and try again.".into(),
+        ))
+    }
+}
+
+/// Step 2: Run loclass attack to recover the diversified key from collected MACs.
+/// Must call `iclass_collect_macs` first.
+///
+/// On success, stores the recovered key in the session for use by dump/write commands.
+#[tauri::command]
+pub async fn iclass_loclass_recover(
+    session: State<'_, Pm3Session>,
+) -> Result<String, AppError> {
+    let output = session
+        .run_command(command_builder::build_iclass_loclass())
+        .await?;
+
+    if let Some(key) = output_parser::parse_iclass_loclass_key(&output) {
+        session.set_iclass_key(Some(key.clone()));
+        Ok(format!("Key recovered: {}. Ready to dump/clone.", key))
+    } else if output.contains("[!!]") || output.to_lowercase().contains("error") {
+        Err(AppError::CommandFailed(
+            "Loclass attack failed. Collect more MAC traces and try again.".into(),
+        ))
+    } else {
+        Err(AppError::CommandFailed(
+            "Could not extract key from loclass output. Collect more MAC traces and try again."
+                .into(),
+        ))
+    }
 }

@@ -655,11 +655,11 @@ pub fn build_hf_mf_staticnested() -> &'static str {
     "hf mf staticnested --collect"
 }
 
-/// Erase all sectors of a MIFARE Classic card using known keys.
-/// Writes factory-default data (all 0x00) and resets keys to FFFFFFFFFFFF.
+/// Wipe all sectors of a MIFARE Classic card to zeros and default keys/access.
+/// Resets data to 0x00 and keys to FFFFFFFFFFFF.
 /// Only works on cards where all sector keys are already known (e.g. fresh magic cards).
 pub fn build_hf_mf_erase() -> &'static str {
-    "hf mf erase"
+    "hf mf wipe"
 }
 
 // ---------------------------------------------------------------------------
@@ -725,6 +725,11 @@ pub fn build_iclass_restore(dump_path: &str) -> String {
     format!("hf iclass restore -f {} --first 6 --last 18 --ki 0", dump_path)
 }
 
+/// iCLASS: restore dump from file using a recovered/custom key (for Elite/SE cards).
+pub fn build_iclass_restore_with_key(dump_path: &str, key: &str) -> String {
+    format!("hf iclass restore -f {} --first 6 --last 18 -k {}", dump_path, key)
+}
+
 // ---------------------------------------------------------------------------
 // HF dump commands (no key recovery needed)
 // ---------------------------------------------------------------------------
@@ -737,6 +742,28 @@ pub fn build_mfu_dump() -> &'static str {
 /// iCLASS: dump card memory using leaked master key (key index 0).
 pub fn build_iclass_dump() -> &'static str {
     "hf iclass dump --ki 0"
+}
+
+/// iCLASS: dump card memory using a recovered/custom key (for Elite/SE cards).
+pub fn build_iclass_dump_with_key(key: &str) -> String {
+    format!("hf iclass dump -k {}", key)
+}
+
+/// iCLASS: wipe card to factory defaults using leaked master key (key index 0).
+pub fn build_iclass_wipe() -> &'static str {
+    "hf iclass wipe --ki 0"
+}
+
+/// iCLASS Elite: simulate tag at a real reader to collect MACs for key recovery.
+/// User must present PM3 at the physical reader. Collects 8+ authentication traces.
+pub fn build_iclass_sim_collect() -> &'static str {
+    "hf iclass sim -t 3"
+}
+
+/// iCLASS Elite: run loclass attack to recover diversified key from collected MACs.
+/// Must run `build_iclass_sim_collect()` first to gather traces.
+pub fn build_iclass_loclass() -> &'static str {
+    "hf iclass loclass"
 }
 
 // ---------------------------------------------------------------------------
@@ -973,6 +1000,33 @@ mod tests {
     #[test]
     fn iclass_dump_cmd() {
         assert_eq!(build_iclass_dump(), "hf iclass dump --ki 0");
+    }
+
+    #[test]
+    fn iclass_dump_with_key_cmd() {
+        let cmd = build_iclass_dump_with_key("AE1A43F54D92B6C0");
+        assert_eq!(cmd, "hf iclass dump -k AE1A43F54D92B6C0");
+    }
+
+    #[test]
+    fn iclass_restore_with_key_cmd() {
+        let cmd = build_iclass_restore_with_key("dump.json", "AE1A43F54D92B6C0");
+        assert_eq!(cmd, "hf iclass restore -f dump.json --first 6 --last 18 -k AE1A43F54D92B6C0");
+    }
+
+    #[test]
+    fn iclass_sim_collect_cmd() {
+        assert_eq!(build_iclass_sim_collect(), "hf iclass sim -t 3");
+    }
+
+    #[test]
+    fn iclass_loclass_cmd() {
+        assert_eq!(build_iclass_loclass(), "hf iclass loclass");
+    }
+
+    #[test]
+    fn iclass_wipe_cmd() {
+        assert_eq!(build_iclass_wipe(), "hf iclass wipe --ki 0");
     }
 
     // -- Verification commands --

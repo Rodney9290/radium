@@ -83,9 +83,10 @@ function SearchIcon() {
 
 interface SavedViewProps {
   refreshTrigger?: number;
+  onNavigateToClone?: () => void;
 }
 
-export function SavedView({ refreshTrigger }: SavedViewProps) {
+export function SavedView({ refreshTrigger, onNavigateToClone }: SavedViewProps) {
   const [cards, setCards] = useState<SavedCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -219,9 +220,9 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
     }
   };
 
-  const handleClone = (card: SavedCard) => {
+  const handleClone = async (card: SavedCard) => {
     const decoded = parseDecoded(card.decoded);
-    wizard.loadSavedCard({
+    await wizard.loadSavedCard({
       frequency: card.frequency,
       cardType: card.cardType,
       uid: card.uid,
@@ -230,6 +231,7 @@ export function SavedView({ refreshTrigger }: SavedViewProps) {
       cloneable: card.cloneable,
       recommendedBlank: card.recommendedBlank,
     });
+    onNavigateToClone?.();
   };
 
   // Loading state

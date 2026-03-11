@@ -45,8 +45,9 @@ pub fn validate_command(cmd: &str) -> Result<(), AppError> {
 }
 
 /// Returns the ordered list of Tauri shell scope names to try.
+/// Prefers v4.x binary names first for faster lookup.
 pub fn pm3_scope_names() -> Vec<&'static str> {
-    let mut names = vec!["proxmark3"];
+    let mut names = vec!["proxmark3-v4", "proxmark3"];
 
     if cfg!(target_os = "windows") {
         names.push("proxmark3-win-c");
@@ -402,10 +403,30 @@ pub fn build_port_candidates() -> Vec<String> {
             ports.push(format!("COM{}", i));
         }
     } else if cfg!(target_os = "macos") {
+        // Dynamic discovery: scan /dev for actual usbmodem devices
+        if let Ok(entries) = std::fs::read_dir("/dev") {
+            let mut found: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.starts_with("tty.usbmodem") {
+                        Some(format!("/dev/{}", name))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            found.sort();
+            ports.extend(found);
+        }
+        // Static fallback in case /dev scan missed anything
         for suffix in &[
             "iceman1", "14101", "14201", "14301", "1", "2", "3",
         ] {
-            ports.push(format!("/dev/tty.usbmodem{}", suffix));
+            let p = format!("/dev/tty.usbmodem{}", suffix);
+            if !ports.contains(&p) {
+                ports.push(p);
+            }
         }
     } else {
         // Linux: dynamic discovery first, then static fallback

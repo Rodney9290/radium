@@ -28,37 +28,123 @@ pub async fn scan_card(
         m.transition(WizardAction::StartScan)?;
     };
 
+    // Log device capabilities for debugging
+    {
+        let caps = session.get_capabilities();
+        eprintln!("[scan] === Device Capabilities ===");
+        eprintln!("[scan] Platform: {:?}, HW variant: {}", caps.platform, caps.hardware_variant);
+        eprintln!("[scan] Client: {}", caps.client_version);
+        eprintln!("[scan] Firmware: {}", caps.firmware_version);
+        eprintln!("[scan] Versions match: {}", caps.versions_match);
+        if caps.has_module_info() {
+            eprintln!("[scan] Compiled LF modules: {:?}", caps.compiled_with_lf);
+            eprintln!("[scan] Compiled HF modules: {:?}", caps.compiled_with_hf);
+        } else {
+            eprintln!("[scan] No compiled module info available (older firmware?)");
+        }
+        eprintln!("[scan] ==============================");
+    }
+
     // 1. Try LF search first (fast path for 125 kHz cards)
+    eprintln!("[scan] Running LF search...");
     let lf_result =
         session.run_command(&command_builder::build_lf_search()).await;
 
+    match &lf_result {
+        Ok(output) => {
+            eprintln!("[scan] LF search output ({} bytes):", output.len());
+            // Log first 500 chars of raw output for debugging
+            let preview = if output.len() > 500 { &output[..500] } else { output };
+            for line in preview.lines() {
+                eprintln!("[scan]   LF> {}", line);
+            }
+            if output.len() > 500 {
+                eprintln!("[scan]   LF> ... ({} more bytes)", output.len() - 500);
+            }
+        }
+        Err(e) => {
+            eprintln!("[scan] LF search FAILED: {}", e);
+        }
+    }
+
     if let Ok(ref output) = lf_result {
-        if let Some((card_type, card_data)) = output_parser::parse_lf_search(output) {
+        let parsed = output_parser::parse_lf_search(output);
+        eprintln!("[scan] LF parse result: {:?}", parsed.as_ref().map(|(ct, _)| ct));
+        if let Some((card_type, card_data)) = parsed {
+            eprintln!("[scan] LF card found: {:?}, UID: {}", card_type, card_data.uid);
             return finish_scan(&machine, card_type, card_data);
         }
     }
 
     // 2. LF found nothing → try HF search (13.56 MHz)
+    eprintln!("[scan] LF found nothing, running HF search...");
     let hf_result =
         session.run_command(&command_builder::build_hf_search()).await;
 
     match hf_result {
         Ok(output) => {
-            if let Some((card_type, mut card_data)) = output_parser::parse_hf_search(&output)
+            eprintln!("[scan] HF search output ({} bytes):", output.len());
+            // Log first 500 chars of raw output for debugging
+            let preview = if output.len() > 500 { &output[..500] } else { &output };
+            for line in preview.lines() {
+                eprintln!("[scan]   HF> {}", line);
+            }
+            if output.len() > 500 {
+                eprintln!("[scan]   HF> ... ({} more bytes)", output.len() - 500);
+            }
+
+            let parsed = output_parser::parse_hf_search(&output);
+            eprintln!("[scan] HF parse result: {:?}", parsed.as_ref().map(|(ct, _)| ct));
+
+            if let Some((card_type, mut card_data)) = parsed
             {
+                eprintln!("[scan] HF card found: {:?}, UID: {}", card_type, card_data.uid);
                 // Enrich HF data with protocol-specific info commands
                 enrich_hf_data(session.inner(), &card_type, &mut card_data).await;
                 return finish_scan(&machine, card_type, card_data);
             }
 
-            // Neither LF nor HF found a card
+            eprintln!("[scan] Neither LF nor HF found a card");
+
+            // Neither LF nor HF found a card — check if modules are missing
+            let caps = session.get_capabilities();
+            let user_message = if caps.has_module_info() {
+                let mut missing = Vec::new();
+                if !caps.has_hf_module("14443A") {
+                    missing.push("ISO 14443A (MIFARE/NTAG)");
+                }
+                if !caps.has_hf_module("iCLASS") {
+                    missing.push("iCLASS");
+                }
+                if !caps.has_hf_module("DESFire") {
+                    missing.push("DESFire");
+                }
+                if !caps.has_lf_module("HID") {
+                    missing.push("HID Prox");
+                }
+                if !caps.has_lf_module("EM 4x05") {
+                    missing.push("EM4100");
+                }
+                if missing.is_empty() {
+                    "No card found. Place the card on the reader and try again.".to_string()
+                } else {
+                    format!(
+                        "No card found. Your firmware is missing modules: {}. \
+                         These were likely skipped during flashing due to limited storage. \
+                         Rebuild firmware with the modules you need, or use a device with more flash memory.",
+                        missing.join(", ")
+                    )
+                }
+            } else {
+                "No card found. Place the card on the reader and try again.".to_string()
+            };
+
             let mut m = machine.lock().map_err(|e| {
                 AppError::CommandFailed(format!("State lock poisoned: {}", e))
             })?;
             m.transition(WizardAction::ReportError {
                 message: "No card detected".to_string(),
-                user_message: "No card found. Place the card on the reader and try again."
-                    .to_string(),
+                user_message,
                 recoverable: true,
                 recovery_action: Some(RecoveryAction::Retry),
             })?;
@@ -168,6 +254,16 @@ async fn enrich_hf_data(
                             format!("Ultralight {}", ul_variant.as_str()),
                         );
                     }
+                }
+            }
+        }
+        CardType::IClass => {
+            // Check if card is Elite/SE (requires diversified keys)
+            if let Ok(info_output) =
+                session.run_command(command_builder::build_hf_iclass_info()).await
+            {
+                if output_parser::is_iclass_elite(&info_output) {
+                    card_data.decoded.insert("iclass_elite".to_string(), "true".to_string());
                 }
             }
         }

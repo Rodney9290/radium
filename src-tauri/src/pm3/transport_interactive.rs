@@ -44,25 +44,26 @@ impl CliTransportInteractive {
     /// The process runs `proxmark3 -p PORT` (no `-f -c`), keeping the
     /// serial connection open for the lifetime of the process.
     pub fn spawn(app: &AppHandle, port: &str) -> Result<Self, AppError> {
-        let args = ["-p", port];
-
-        // Try sidecar first
+        // Try v4.x `-p PORT` first, then old-style `PORT` as fallback for v3.x.
         let spawn_result = if let Ok(cmd) = app.shell().sidecar("binaries/proxmark3") {
-            cmd.args(&args).spawn().ok()
+            cmd.args(["-p", port]).spawn().ok()
         } else {
             None
-        };
+        }.or_else(|| {
+            app.shell().sidecar("binaries/proxmark3").ok()
+                .and_then(|cmd| cmd.args([port]).spawn().ok())
+        });
 
         let (rx, child) = if let Some(result) = spawn_result {
             result
         } else {
-            // Fall back to scope names
             let scope_names = pm3_scope_names();
             let mut first_err: Option<String> = None;
             let mut found = None;
 
+            // Try v4.x `-p PORT` first
             for name in &scope_names {
-                match app.shell().command(name).args(&args).spawn() {
+                match app.shell().command(name).args(["-p", port]).spawn() {
                     Ok(result) => {
                         found = Some(result);
                         break;
@@ -70,6 +71,23 @@ impl CliTransportInteractive {
                     Err(e) => {
                         if first_err.is_none() {
                             first_err = Some(e.to_string());
+                        }
+                    }
+                }
+            }
+
+            // Fallback: old-style `PORT` for v3.x clients
+            if found.is_none() {
+                for name in &scope_names {
+                    match app.shell().command(name).args([port]).spawn() {
+                        Ok(result) => {
+                            found = Some(result);
+                            break;
+                        }
+                        Err(e) => {
+                            if first_err.is_none() {
+                                first_err = Some(e.to_string());
+                            }
                         }
                     }
                 }
@@ -92,10 +110,104 @@ impl CliTransportInteractive {
     }
 
     /// Wait for the initial PM3 prompt after spawning.
-    /// The PM3 client outputs version info and then shows its prompt.
+    ///
+    /// The PM3 client outputs version info then writes `pm3 --> ` without a
+    /// trailing newline. Because the OS pipe is line-buffered, that prompt
+    /// never arrives as a stdout event. To flush it, we send a newline after
+    /// the version info stops flowing, which triggers the client to redisplay
+    /// the prompt with surrounding newlines that DO flush through the pipe.
     pub async fn wait_for_ready(&self) -> Result<String, AppError> {
-        self.read_until_prompt(PROMPT_TIMEOUT.as_secs(), &mut |_| {})
+        eprintln!("[transport_interactive] wait_for_ready starting...");
+        // Wait for version info to start flowing, then send a nudge
+        let mut got_content = false;
+        let mut accumulated = String::new();
+        let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
+
+        {
+            let mut rx_guard = self.rx.lock().await;
+            let rx = rx_guard.as_mut().ok_or_else(|| {
+                AppError::CommandFailed("PM3 process not available".into())
+            })?;
+
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+
+                // Use a short timeout (2s) once we've seen content — if no more
+                // data arrives, the version dump is done and we can send the nudge.
+                let wait_dur = if got_content {
+                    Duration::from_secs(2).min(remaining)
+                } else {
+                    remaining
+                };
+
+                match timeout(wait_dur, rx.recv()).await {
+                    Err(_) if got_content => {
+                        eprintln!("[transport_interactive] version output done, sending nudge...");
+                        break;
+                    }
+                    Err(_) => {
+                        eprintln!("[transport_interactive] TIMEOUT: no output from PM3");
+                        return Err(AppError::Timeout(
+                            "No output from PM3 process".into(),
+                        ));
+                    }
+                    Ok(None) => {
+                        eprintln!("[transport_interactive] PM3 process exited during startup");
+                        return Err(AppError::CommandFailed(
+                            "PM3 process exited during startup".into(),
+                        ));
+                    }
+                    Ok(Some(event)) => match event {
+                        CommandEvent::Stdout(bytes) => {
+                            let raw = String::from_utf8_lossy(&bytes);
+                            let cleaned = strip_ansi(&raw);
+                            // Check raw chunk for prompt/echo
+                            if contains_pm3_prompt(&cleaned) {
+                                for line in cleaned.lines() {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() && !is_prompt_or_echo(trimmed) {
+                                        accumulated.push_str(trimmed);
+                                        accumulated.push('\n');
+                                    }
+                                }
+                                return Ok(accumulated);
+                            }
+                            for line in cleaned.lines() {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() && !is_prompt_or_echo(trimmed) {
+                                    got_content = true;
+                                    accumulated.push_str(trimmed);
+                                    accumulated.push('\n');
+                                }
+                            }
+                        }
+                        CommandEvent::Stderr(_) => {
+                            got_content = true;
+                        }
+                        CommandEvent::Terminated(_) | CommandEvent::Error(_) => {
+                            return Err(AppError::CommandFailed(
+                                "PM3 process died during startup".into(),
+                            ));
+                        }
+                        _ => {}
+                    },
+                }
+            }
+        } // drop rx_guard so write_stdin can take the child lock
+
+        // Send a real command to flush the buffered prompt.
+        // An empty line doesn't produce enough output to flush the pipe.
+        // `hw status` generates multiple lines that flush through, and the
+        // trailing prompt also gets pushed out with them.
+        self.write_stdin("hw status")?;
+
+        // Read until prompt appears after the command output
+        self.read_until_prompt(15, Some("hw status"), &mut |_| {})
             .await
+            .map(|post_nudge| format!("{}{}", accumulated, post_nudge))
     }
 
     /// Read output from the PM3 process until a prompt line is detected.
@@ -105,9 +217,23 @@ impl CliTransportInteractive {
     /// - `[usb] pm3 --> ` (connected via USB)
     /// - `[bt] pm3 --> ` (connected via Bluetooth)
     /// - `proxmark3> ` (older firmware)
+    ///
+    /// In pipe/script mode, PM3 echoes each command as it's read from stdin:
+    /// `[usb] pm3 --> hw version\n` — this echo arrives BEFORE the command
+    /// executes. If `sent_cmd` is provided, the first `pm3 -->` occurrence
+    /// matching that command is recognized as the echo and skipped, preventing
+    /// premature return before actual command output arrives.
+    ///
+    /// After the echo is skipped, this function continues reading until it
+    /// sees a second `pm3 -->` (the real completion prompt). If the prompt
+    /// doesn't flush (pipe buffering), a silence timeout returns the
+    /// accumulated output instead of waiting for the full deadline:
+    /// - 5s if no output received yet (fast return for no-output commands)
+    /// - 15s if output is flowing (handles slow commands with long gaps)
     async fn read_until_prompt(
         &self,
         timeout_secs: u64,
+        sent_cmd: Option<&str>,
         on_line: &mut (dyn FnMut(OutputLine) + Send),
     ) -> Result<String, AppError> {
         let mut rx_guard = self.rx.lock().await;
@@ -115,11 +241,38 @@ impl CliTransportInteractive {
             AppError::CommandFailed("PM3 process not available".into())
         })?;
 
-        let deadline = Duration::from_secs(timeout_secs);
+        let full_deadline = Duration::from_secs(timeout_secs);
         let mut accumulated = String::new();
+        let mut echo_skipped = sent_cmd.is_none(); // No echo to skip if no command given
+        let mut got_output = false; // Have we received any real output lines?
 
         loop {
-            match timeout(deadline, rx.recv()).await {
+            // After skipping the echo, use a silence timeout so we don't block
+            // forever when the prompt doesn't flush through the pipe.
+            // - Before any output: 5s (fast return for no-output commands)
+            // - After output starts: 15s (handles slow commands like `lf search -u`
+            //   that have long gaps between output during demodulation phases)
+            let wait_dur = if !echo_skipped {
+                full_deadline
+            } else if got_output {
+                Duration::from_secs(15).min(full_deadline)
+            } else {
+                Duration::from_secs(5).min(full_deadline)
+            };
+
+            match timeout(wait_dur, rx.recv()).await {
+                Err(_) if echo_skipped => {
+                    // Silence after echo — prompt likely stayed in pipe buffer.
+                    // Return what we have; this is normal for pipe-buffered mode.
+                    eprintln!(
+                        "[read_until_prompt] silence timeout after echo ({}s, got_output={}), returning {} bytes",
+                        wait_dur.as_secs(),
+                        got_output,
+                        accumulated.len()
+                    );
+                    self.prompt_notify.notify_one();
+                    return Ok(accumulated);
+                }
                 Err(_) => {
                     return Err(AppError::Timeout(format!(
                         "PM3 prompt not received within {}s",
@@ -140,16 +293,63 @@ impl CliTransportInteractive {
                         let raw = String::from_utf8_lossy(&bytes);
                         let cleaned = strip_ansi(&raw);
 
-                        // Check each line for the prompt
+                        if contains_pm3_prompt(&cleaned) {
+                            // Check if this is the echo of the command we just sent.
+                            // In script mode, PM3 echoes: [usb] pm3 --> <cmd>
+                            // This arrives BEFORE the command executes, so we must
+                            // skip it to avoid returning with no output.
+                            if !echo_skipped {
+                                if let Some(cmd) = sent_cmd {
+                                    if is_echo_of_command(&cleaned, cmd) {
+                                        eprintln!(
+                                            "[read_until_prompt] skipping command echo for '{}'",
+                                            cmd
+                                        );
+                                        echo_skipped = true;
+                                        // Extract any non-prompt content from this chunk
+                                        // (unlikely but handle gracefully)
+                                        for line in cleaned.lines() {
+                                            let trimmed = line.trim();
+                                            if !trimmed.is_empty()
+                                                && !is_prompt_or_echo(trimmed)
+                                            {
+                                                on_line(OutputLine {
+                                                    text: trimmed.to_string(),
+                                                    is_error: false,
+                                                });
+                                                accumulated.push_str(trimmed);
+                                                accumulated.push('\n');
+                                                got_output = true;
+                                            }
+                                        }
+                                        continue; // Skip — keep reading for real output
+                                    }
+                                }
+                            }
+
+                            // This is a real prompt (not our command's echo).
+                            // Extract any output lines from this chunk, then return.
+                            for line in cleaned.lines() {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() && !is_prompt_or_echo(trimmed) {
+                                    on_line(OutputLine {
+                                        text: trimmed.to_string(),
+                                        is_error: false,
+                                    });
+                                    accumulated.push_str(trimmed);
+                                    accumulated.push('\n');
+                                }
+                            }
+                            self.prompt_notify.notify_one();
+                            return Ok(accumulated);
+                        }
+
+                        // No prompt in this chunk — regular output lines.
+                        echo_skipped = true; // Real output means echo phase is over.
                         for line in cleaned.lines() {
                             let trimmed = line.trim();
                             if trimmed.is_empty() {
                                 continue;
-                            }
-
-                            if is_pm3_prompt(trimmed) {
-                                self.prompt_notify.notify_one();
-                                return Ok(accumulated);
                             }
 
                             on_line(OutputLine {
@@ -158,6 +358,7 @@ impl CliTransportInteractive {
                             });
                             accumulated.push_str(trimmed);
                             accumulated.push('\n');
+                            got_output = true;
                         }
                     }
                     CommandEvent::Stderr(bytes) => {
@@ -171,6 +372,7 @@ impl CliTransportInteractive {
                             });
                             accumulated.push_str(trimmed);
                             accumulated.push('\n');
+                            got_output = true;
                         }
                     }
                     CommandEvent::Error(msg) => {
@@ -221,8 +423,10 @@ impl Pm3Transport for CliTransportInteractive {
         // Write command to stdin
         self.write_stdin(cmd)?;
 
-        // Read output until the prompt returns
-        self.read_until_prompt(PROMPT_TIMEOUT.as_secs(), &mut |_| {})
+        // Read output until the prompt returns.
+        // Pass `cmd` so we can skip the script-mode echo that PM3 sends
+        // before executing the command (e.g., `[usb] pm3 --> hw version`).
+        self.read_until_prompt(PROMPT_TIMEOUT.as_secs(), Some(cmd), &mut |_| {})
             .await
     }
 
@@ -235,7 +439,7 @@ impl Pm3Transport for CliTransportInteractive {
         validate_command(cmd)?;
         self.write_stdin(cmd)?;
 
-        self.read_until_prompt(timeout_secs, &mut |line| {
+        self.read_until_prompt(timeout_secs, Some(cmd), &mut |line| {
             on_line(line);
         })
         .await
@@ -293,18 +497,49 @@ impl Pm3Transport for CliTransportInteractive {
     }
 }
 
-/// Check if a line is a PM3 interactive prompt.
+/// Check if a raw chunk of text contains a PM3 prompt or command echo.
 ///
-/// Known prompt formats:
-/// - `pm3 --> ` (default)
-/// - `[usb] pm3 --> ` (USB connection indicator)
-/// - `[bt] pm3 --> ` (Bluetooth connection indicator)
-/// - `proxmark3> ` (older firmware)
-/// - `[usb|script] pm3 --> ` (script mode)
-fn is_pm3_prompt(line: &str) -> bool {
+/// In pipe mode, the PM3 prompt (`pm3 --> `) has no trailing newline, so it
+/// stays in the pipe buffer until the NEXT command is sent. The prompt then
+/// flushes as `[usb|script] pm3 --> NEXT_CMD\n` (an "echo" line).
+fn contains_pm3_prompt(text: &str) -> bool {
+    text.contains("pm3 -->") || text.contains("proxmark3>")
+}
+
+/// Check if a line is a PM3 prompt or command echo — either way, it should
+/// be filtered from command output.
+fn is_prompt_or_echo(line: &str) -> bool {
     let trimmed = line.trim();
-    trimmed.ends_with("pm3 -->")
-        || trimmed.ends_with("pm3 --> ")
-        || trimmed.ends_with("proxmark3>")
-        || trimmed.ends_with("proxmark3> ")
+    trimmed.contains("pm3 -->") || trimmed.contains("proxmark3>")
+}
+
+/// Check if a chunk contains the echo of the command we just sent.
+///
+/// In script/pipe mode, PM3 echoes each command before executing it:
+///   `[usb] pm3 --> hw version`
+///
+/// This echo arrives BEFORE the command output. We must recognize and skip
+/// it to prevent `read_until_prompt` from returning prematurely (with no
+/// output or stale output from a previous command).
+///
+/// The match is by the first word of the command (e.g., "hw" for "hw version")
+/// to handle cases where PM3 slightly reformats the echo.
+fn is_echo_of_command(text: &str, cmd: &str) -> bool {
+    let cmd_first_word = cmd.split_whitespace().next().unwrap_or(cmd);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(pos) = trimmed.find("pm3 -->") {
+            let after = trimmed[pos + 7..].trim(); // 7 = "pm3 -->".len()
+            // Match if the text after `pm3 -->` starts with the command
+            // (full match or first-word match for robustness)
+            if after == cmd
+                || after.starts_with(&format!("{} ", cmd))
+                || after.starts_with(&format!("{} ", cmd_first_word))
+                || after == cmd_first_word
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
