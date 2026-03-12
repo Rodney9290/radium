@@ -47,20 +47,13 @@ pub fn validate_command(cmd: &str) -> Result<(), AppError> {
 /// Returns the ordered list of Tauri shell scope names to try.
 /// Prefers v4.x binary names first for faster lookup.
 pub fn pm3_scope_names() -> Vec<&'static str> {
-    let mut names = vec!["proxmark3-v4", "proxmark3"];
-
     if cfg!(target_os = "windows") {
-        names.push("proxmark3-win-c");
-        names.push("proxmark3-win-progfiles");
+        vec!["proxmark3-win-c", "proxmark3-win-progfiles", "proxmark3-v4", "proxmark3"]
     } else if cfg!(target_os = "macos") {
-        names.push("proxmark3-mac-local");
-        names.push("proxmark3-mac-brew");
+        vec!["proxmark3-mac-local", "proxmark3-mac-brew", "proxmark3-v4", "proxmark3"]
     } else {
-        names.push("proxmark3-linux-local");
-        names.push("proxmark3-linux-usr");
+        vec!["proxmark3-linux-local", "proxmark3-linux-usr", "proxmark3-v4", "proxmark3"]
     }
-
-    names
 }
 
 // ===========================================================================

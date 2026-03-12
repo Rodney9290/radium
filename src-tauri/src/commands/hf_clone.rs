@@ -496,17 +496,54 @@ pub async fn hf_dump(
 // Write workflow implementations
 // ---------------------------------------------------------------------------
 
-/// Gen1a: single `hf mf cload` via magic wakeup backdoor.
+/// Gen1a: magic cload + optional restore fallback for USCUID cards.
+///
+/// Flow:
+/// 1. Patch SAK byte in block 0 (0x88 → 0x08) so the card broadcasts the
+///    correct SAK to access control readers.
+/// 2. `hf mf cload` — writes all blocks via Gen1a magic backdoor.
+///    - Full success: done.
+///    - Block 0 fails (wupC1 error): hard error — card is permanently locked,
+///      user needs a proper Gen2/CUID card.
+///    - Non-block-0 blocks fail (USCUID partial write): fall through to step 3.
+/// 3. `hf mf restore` — fills in remaining blocks via normal MIFARE auth.
+///    This covers USCUID chips that lock certain sectors but still allow
+///    standard auth writes. Together cload + restore produce a complete clone.
 async fn write_gen1a(
     session: &Pm3Session,
     dump_path: &str,
     machine: &State<'_, Mutex<WizardMachine>>,
 ) -> Result<WizardState, AppError> {
-    update_write_progress(session.app(), machine, 0.3, Some(1), Some(2))?;
+    update_write_progress(session.app(), machine, 0.2, Some(1), Some(3))?;
 
-    let cmd = command_builder::build_mf_cload(dump_path);
-    let output = session.run_command(&cmd).await?;
-    check_write_output(&output)?;
+    // Step 1: patch SAK byte for Gen1a compatibility.
+    let write_path = patch_dump_sak_for_gen1a(dump_path)?;
+    if write_path != dump_path {
+        session.set_dump_path(Some(write_path.clone()));
+    }
+
+    // Step 2: cload — writes block 0 (UID + SAK) via magic backdoor.
+    let cmd = command_builder::build_mf_cload(&write_path);
+    let cload_output = session.run_command(&cmd).await?;
+
+    // If block 0 itself failed, the card is permanently locked — hard error.
+    if cload_output.contains("wupC1 error") || cload_output.contains("Can't set magic card block: 0") {
+        return Err(AppError::CommandFailed(
+            "USCUID/Fudan card detected — block 0 is permanently locked. \
+             Use a Gen2 (CUID) card instead for a full clone."
+                .to_string(),
+        ));
+    }
+
+    // Step 3: if cload had partial failures (USCUID block locks), run restore
+    // to fill in the remaining blocks via normal MIFARE authentication.
+    let had_partial_failure = cload_output.contains("Can't set magic card block");
+    if had_partial_failure {
+        update_write_progress(session.app(), machine, 0.6, Some(2), Some(3))?;
+        let restore_cmd = command_builder::build_mf_restore(dump_path);
+        let restore_output = session.run_command(&restore_cmd).await?;
+        check_write_output_regular_mifare(&restore_output)?;
+    }
 
     finish_write(session, machine).await
 }
@@ -728,6 +765,38 @@ fn update_write_progress(
         }),
     );
     Ok(())
+}
+
+/// Patch a MIFARE Classic dump file so block 0 byte 5 (SAK) is correct for Gen1a.
+/// Gen1a cards broadcast this byte directly as the SAK during anti-collision.
+/// Original cards often have 0x88 (cascade indicator) stored there as manufacturer
+/// data, which confuses readers. Returns a path to a patched temp copy, or the
+/// original path if no patch was needed.
+fn patch_dump_sak_for_gen1a(dump_path: &str) -> Result<String, AppError> {
+    let mut data = std::fs::read(dump_path).map_err(|e| {
+        AppError::CommandFailed(format!("Failed to read dump file: {}", e))
+    })?;
+
+    if data.len() < 16 {
+        return Ok(dump_path.to_string());
+    }
+
+    let sak = data[5];
+    // 0x08 = MF Classic 1K, 0x18 = MF Classic 4K, 0x20 = MIFARE Plus/DESFire
+    let already_correct = matches!(sak, 0x08 | 0x18 | 0x20);
+    if already_correct {
+        return Ok(dump_path.to_string());
+    }
+
+    let correct_sak: u8 = if data.len() >= 4096 { 0x18 } else { 0x08 };
+    data[5] = correct_sak;
+
+    let patched_path = dump_path.trim_end_matches(".bin").to_string() + "-gen1a.bin";
+    std::fs::write(&patched_path, &data).map_err(|e| {
+        AppError::CommandFailed(format!("Failed to write patched dump: {}", e))
+    })?;
+
+    Ok(patched_path)
 }
 
 /// Check PM3 write output for critical errors (`[!!]`).

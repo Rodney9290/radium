@@ -30,9 +30,9 @@ function getRetryLabel(action: RecoveryAction | null | undefined, source?: strin
 
 const DETECT_HINTS = [
   'Try a different USB cable (some cables are charge-only)',
-  'Check Device Manager for a COM port (Ports section)',
-  'PM3 Easy may need CH340 driver \u2014 download from wch-ic.com',
-  'Antivirus may block proxmark3.exe \u2014 add it to exceptions',
+  'Unplug and replug the Proxmark3',
+  'Run: brew install proxmark3 to install or reinstall',
+  'Open Radium from a terminal: cd ~/radium && npm run tauri dev',
 ];
 
 export function ErrorStep({ message, recoverable, recoveryAction, errorSource, onRetry, onReset }: ErrorStepProps) {
