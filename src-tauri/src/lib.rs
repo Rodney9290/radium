@@ -14,6 +14,17 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Ensure proxmark3 binary directories are in PATH when launched from Finder/Dock
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let extra = if cfg!(target_os = "macos") {
+        "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin"
+    } else {
+        "/usr/local/bin:/usr/bin"
+    };
+    if !current_path.contains("/usr/local/bin") {
+        std::env::set_var("PATH", format!("{}:{}", extra, current_path));
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())

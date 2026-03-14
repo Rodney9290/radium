@@ -244,9 +244,45 @@ async fn probe_port(app: &AppHandle, port: &str) -> Result<DiscoveredDevice, App
         return Ok(device);
     }
 
+    // === Last resort: std::process::Command bypassing Tauri shell plugin ===
+    if let Some(device) = probe_port_direct(port).await {
+        return Ok(device);
+    }
+
     Err(AppError::CommandFailed(
         "Failed to spawn proxmark3: binary not found".into(),
     ))
+}
+
+/// Probe using std::process::Command directly, bypassing the Tauri shell plugin.
+/// Used as a last resort when the shell plugin scopes fail in production bundles.
+async fn probe_port_direct(port: &str) -> Option<DiscoveredDevice> {
+    let candidates = if cfg!(target_os = "macos") {
+        vec!["/usr/local/bin/proxmark3", "/opt/homebrew/bin/proxmark3"]
+    } else if cfg!(target_os = "linux") {
+        vec!["/usr/local/bin/proxmark3", "/usr/bin/proxmark3"]
+    } else {
+        return None;
+    };
+
+    for bin in candidates {
+        if !std::path::Path::new(bin).exists() {
+            continue;
+        }
+        let result = tokio::process::Command::new(bin)
+            .args(["-p", port, "-f", "-c", "hw version"])
+            .output()
+            .await;
+        if let Ok(output) = result {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let cleaned = strip_ansi(&stdout);
+            if let Some(device) = parse_probe_output(port, &cleaned) {
+                eprintln!("[probe_port_direct] success with {}", bin);
+                return Some(device);
+            }
+        }
+    }
+    None
 }
 
 /// Probe using interactive spawn: `proxmark3 <port>` with stdin piped commands.
